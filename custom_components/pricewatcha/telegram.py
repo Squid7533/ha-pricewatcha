@@ -26,6 +26,7 @@ from .format import (
     format_search,
     format_track,
     format_usage,
+    to_plain,
     truncate,
 )
 
@@ -152,6 +153,18 @@ class TelegramFrontend:
             _LOGGER.debug("Telegram bot service still expects 'target'; using it")
         return self._chat_param
 
+    async def _async_call(self, chat_id: int, message: str, parse_mode: str) -> None:
+        await self.hass.services.async_call(
+            TELEGRAM_DOMAIN,
+            TELEGRAM_SEND_MESSAGE,
+            {
+                self._chat_param_name(): [int(chat_id)],
+                "message": message,
+                "parse_mode": parse_mode,
+            },
+            blocking=True,
+        )
+
     async def _async_send(self, chat_id: int, text: str) -> None:
         if not self._service_available():
             if not self._warned_missing_service:
@@ -161,21 +174,17 @@ class TelegramFrontend:
                     "(Settings -> Devices & services -> Add integration -> Telegram bot)"
                 )
             return
+        # HTML gives bold prices and tappable links. The formatters escape every
+        # dynamic value, but a rejected entity must still not swallow the reply: fall
+        # back to the same text as plain text once.
         try:
-            await self.hass.services.async_call(
-                TELEGRAM_DOMAIN,
-                TELEGRAM_SEND_MESSAGE,
-                {
-                    self._chat_param_name(): [int(chat_id)],
-                    "message": truncate(text),
-                    # The bot entry may parse HTML or MarkdownV2, which rejects
-                    # plain text like "(7.5%)" or "1." — always send plain text.
-                    "parse_mode": "plain_text",
-                },
-                blocking=True,
-            )
+            await self._async_call(chat_id, truncate(text), "html")
         except Exception as err:  # noqa: BLE001 - a failed reply must not kill the listener
-            _LOGGER.warning("Telegram send failed: %s", err)
+            _LOGGER.debug("Telegram rejected the HTML reply (%s); retrying as plain text", err)
+            try:
+                await self._async_call(chat_id, truncate(to_plain(text)), "plain_text")
+            except Exception as plain_err:  # noqa: BLE001
+                _LOGGER.warning("Telegram send failed: %s", plain_err)
 
     async def _async_register_commands(self) -> None:
         """Make the commands visible in Telegram's "/" menu."""

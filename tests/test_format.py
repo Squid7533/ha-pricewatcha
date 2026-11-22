@@ -10,48 +10,162 @@ from custom_components.pricewatcha.format import (
     format_search,
     format_track,
     format_usage,
+    to_plain,
     truncate,
 )
 
 DEALS = {
-    "query": "iphone 17 pro",
-    "compared": 6,
-    "matched": 141,
+    "query": "iphone air wolkenweiß",
+    "compared": 10,
+    "matched": 14,
     "deals": [
         {
             "product_id": "prod_a",
-            "name": "iPhone 17 Pro • 256 GB",
-            "price": 931.0,
+            "name": "Apple iPhone Air 256GB wolkenweiß",
+            "price": 669.0,
             "currency": "EUR",
-            "shop": "Backmarket",
-            "vs_average_pct": 7.5,
-            "url": "https://example.com/a",
+            "shop": "Asgoodasnew",
+            "condition": "very good",
+            "capacity": "256 GB",
+            "vs_average_pct": 4.3,
+            "average_price": 699.0,
+            "historical_low": 669.0,
+            "vs_low_pct": 0.0,
+            "trend": "downward",
+            "url": "https://example.com/a?x=1&y=2",
+            "history": [
+                {"date": "2026-10-13", "price": 739.0},
+                {"date": "2026-11-18", "price": 669.0},
+            ],
         },
         {
             "product_id": "prod_b",
-            "name": "Apple iPhone 17 Pro 256GB",
-            "price": 949.5,
+            "name": "Apple iPhone Air 256GB wolkenweiß",
+            "price": 699.0,
             "currency": "EUR",
             "shop": "Asgoodasnew",
-            "vs_average_pct": None,
+            "condition": "like new",
+            "capacity": "256 GB",
+            "vs_average_pct": 3.9,
+            "average_price": 727.0,
+            "historical_low": 699.0,
+            "vs_low_pct": 0.0,
+            "trend": "downward",
             "url": "https://example.com/b",
+            "history": [],
+        },
+    ],
+    "groups": [
+        {
+            "capacity": "256 GB",
+            "offers": [
+                {"condition": "very good", "price": 669.0, "currency": "EUR", "shop": "Asgoodasnew", "historical_low": 669.0},
+                {"condition": "good", "price": 689.0, "currency": "EUR"},
+                {"condition": "like new", "price": 699.0, "currency": "EUR"},
+                {"condition": "new", "price": 889.0, "currency": "EUR"},
+            ],
+        },
+        {
+            "capacity": "512 GB",
+            "offers": [
+                {"condition": "like new", "price": 819.0, "currency": "EUR"},
+            ],
         },
     ],
 }
 
 
-def test_deals_message_layout():
+def test_deals_header_counts_matches_and_shortlist():
     text = format_deals(DEALS)
-    lines = text.split("\n")
-    assert lines[0] == 'Best deals for "iphone 17 pro" (6 compared):'
-    assert lines[1] == "1. iPhone 17 Pro • 256 GB — 931 EUR at Backmarket (7.5% below its average)"
-    assert lines[2] == "https://example.com/a"
-    assert "2. Apple iPhone 17 Pro 256GB — 949.50 EUR at Asgoodasnew" in text
-    assert "below its average)" not in lines[3]
+    assert text.split("\n")[0] == "<b>iphone air wolkenweiß</b> — 14 matches · 10 compared"
+
+
+def test_deals_show_condition_price_and_shop():
+    text = format_deals(DEALS)
+    assert "<b>1. 669 € · Asgoodasnew · very good</b>" in text
+    assert "<b>2. 699 € · Asgoodasnew · like new</b>" in text
+
+
+def test_deals_show_value_against_own_history():
+    text = format_deals(DEALS)
+    assert "4.3% below its own average (699 €)" in text
+    assert "lowest recorded price" in text
+    assert "price falling" in text
+
+
+def test_deals_show_the_dated_history_for_the_first_deal_only():
+    text = format_deals(DEALS)
+    assert "Price history: 13.10. 739 € → 18.11. 669 €" in text
+    assert text.count("Price history:") == 1
+
+
+def test_deals_escape_the_url_and_render_a_tappable_offer():
+    text = format_deals(DEALS)
+    assert 'href="https://example.com/a?x=1&amp;y=2">See offer</a>' in text
+    assert "https://example.com/a?x=1&y=2\">" not in text
+
+
+def test_deals_group_by_capacity_and_condition():
+    text = format_deals(DEALS)
+    assert "256 GB: very good 669 € · good 689 € · like new 699 € · new 889 €" in text
+    assert "512 GB: like new 819 €" in text
+
+
+def test_deals_verdict_names_the_upcharge_for_new_and_like_new():
+    text = format_deals(DEALS)
+    assert "<b>Verdict:</b>" in text
+    assert "Best value: 669 € (very good) at Asgoodasnew" in text
+    assert "4.3% below its own average" in text
+    assert "the lowest price recorded for this variant" in text
+    assert "New costs 220 € more, like new 30 € more." in text
+    assert "Like new is usually the best compromise." in text
+
+
+def test_deals_without_history_still_format():
+    payload = {
+        "query": "iphone 17 pro",
+        "compared": 1,
+        "matched": 1,
+        "deals": [
+            {
+                "product_id": "prod_x",
+                "name": "iPhone 17 Pro",
+                "price": 949.5,
+                "currency": "EUR",
+                "shop": "Backmarket",
+                "condition": None,
+                "capacity": None,
+                "url": None,
+            }
+        ],
+        "groups": [],
+    }
+    text = format_deals(payload)
+    assert "1. 949.50 € · Backmarket" in text
+    assert "Best value: 949.50 € at Backmarket." in text
+    assert "Price history" not in text
 
 
 def test_deals_empty():
     assert format_deals({"query": "nothing", "deals": []}) == 'Nothing matched "nothing".'
+
+
+def test_names_and_shops_are_escaped():
+    payload = {
+        "query": "a < b",
+        "deals": [
+            {
+                "name": "iPhone <b>Pro</b> & Co",
+                "price": 900,
+                "currency": "EUR",
+                "shop": "Shop & Sons",
+            }
+        ],
+    }
+    text = format_deals(payload)
+    assert "iPhone &lt;b&gt;Pro&lt;/b&gt; &amp; Co" in text
+    assert "Shop &amp; Sons" in text
+    assert "<b>Pro</b>" not in text
 
 
 def test_search_message():
@@ -70,7 +184,7 @@ def test_search_message():
     }
     text = format_search(payload)
     assert text.startswith('Search "iphone" — 2 matches:')
-    assert "iPhone 17 Pro — 931 EUR · Backmarket" in text
+    assert "iPhone 17 Pro — 931 € · Backmarket" in text
     assert "https://example.com/a" in text
 
 
@@ -93,8 +207,8 @@ def test_alerts_message_with_thresholds_and_paused():
     text = format_alerts(payload)
     assert "#77 Deal range" in text
     assert "on any drop" in text
-    assert "min 499 EUR" in text
-    assert "max 599 EUR" in text
+    assert "min 499 €" in text
+    assert "max 599 €" in text
     assert text.endswith("(paused)")
 
 
@@ -114,7 +228,7 @@ def test_track_completed():
     }
     text = format_track(payload)
     assert text.startswith("Tracking submitted: completed")
-    assert "iPhone 15 Pro — 489 EUR" in text
+    assert "iPhone 15 Pro — 489 €" in text
 
 
 def test_track_failed():
@@ -143,8 +257,8 @@ def test_price_drop():
     )
     lines = text.split("\n")
     assert lines[0] == "Price drop: iPhone Air"
-    assert lines[1] == "899 EUR (was 981 EUR, -8.4%) at Backmarket"
-    assert lines[2] == "https://example.com/x"
+    assert lines[1] == "899 € (was 981 €, -8.4%) at Backmarket"
+    assert "https://example.com/x" in lines[2]
 
 
 def test_truncate_keeps_words_and_marks_cut():
@@ -155,8 +269,20 @@ def test_truncate_keeps_words_and_marks_cut():
     assert "\n" not in cut
 
 
+def test_truncate_closes_open_tags():
+    text = "<b>" + ("word " * 200) + "</b>"
+    cut = truncate(text, limit=60)
+    assert cut.endswith("…</b>")
+    assert cut.count("<b>") == cut.count("</b>")
+
+
 def test_truncate_leaves_short_text_alone():
     assert truncate("short", limit=100) == "short"
+
+
+def test_to_plain_strips_tags_and_keeps_the_link_target():
+    text = '<b>Hi</b> &amp; <a href="https://x.example/y?z=1&amp;q=2">See offer</a>'
+    assert to_plain(text) == "Hi & See offer (https://x.example/y?z=1&q=2)"
 
 
 def test_help_lists_commands():
@@ -167,3 +293,24 @@ def test_help_lists_commands():
 
 def test_usage():
     assert format_usage("/deal", "iphone 18 pro") == "Usage: /deal iphone 18 pro"
+
+
+def test_truncate_closes_tags_without_any_space_to_cut_at():
+    cut = truncate("<b>" + "x" * 200, limit=50)
+    assert cut.endswith("</b>")
+    assert cut.count("<b>") == cut.count("</b>")
+
+
+def test_partial_data_is_announced():
+    payload = {
+        "query": "iphone air",
+        "compared": 1,
+        "matched": 1,
+        "deals": [
+            {"name": "Apple iPhone Air 256GB", "price": 669, "currency": "EUR", "shop": "Asgoodasnew"}
+        ],
+        "groups": [],
+        "partial": {"details": 1, "history": 0, "rate_limited": True},
+    }
+    text = format_deals(payload)
+    assert "Some offer links could not be loaded (rate limit); try again in a moment." in text

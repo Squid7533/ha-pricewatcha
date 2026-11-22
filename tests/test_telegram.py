@@ -37,6 +37,7 @@ class FakeServices:
         self.calls: list[tuple[str, str, dict]] = []
         self.available = True
         self.chat_fields = {"chat_id"}
+        self.reject_html = False
 
     def has_service(self, domain: str, service: str) -> bool:
         return self.available
@@ -50,6 +51,8 @@ class FakeServices:
         }
 
     async def async_call(self, domain, service, data, blocking=False):
+        if self.reject_html and data.get("parse_mode") == "html":
+            raise RuntimeError("Bad Request: can't parse entities")
         self.calls.append((domain, service, data))
 
 
@@ -186,7 +189,9 @@ def test_deal_command_answers_in_telegram():
         domain, service, data = hass.services.calls[0]
         assert (domain, service) == ("telegram_bot", "send_message")
         assert data["chat_id"] == [42]
-        assert 'Best deals for "iphone 17 pro"' in data["message"]
+        assert "iphone 17 pro" in data["message"]
+        assert "compared" in data["message"]
+        assert data["parse_mode"] == "html"
 
     run(scenario())
 
@@ -197,7 +202,7 @@ def test_free_text_becomes_deal_query():
         hass.bus.fire("telegram_text", {"chat_id": 7, "text": "iphone 17 pro"})
         await asyncio.sleep(0.05)
 
-        assert "Best deals" in hass.services.calls[0][2]["message"]
+        assert "iphone 17 pro" in hass.services.calls[0][2]["message"]
 
     run(scenario())
 
@@ -306,7 +311,7 @@ def test_large_drop_is_notified():
         assert len(hass.services.calls) == 1
         message = hass.services.calls[0][2]["message"]
         assert message.startswith("Price drop: iPhone Air")
-        assert "899 EUR" in message
+        assert "899 €" in message
 
     run(scenario())
 
@@ -483,13 +488,28 @@ def test_falls_back_to_target_on_older_home_assistant():
     run(scenario())
 
 
-def test_messages_are_sent_as_plain_text():
-    """A bot entry may be configured for HTML/Markdown, where "(7.5%)" is an error."""
-
+def test_messages_are_sent_as_html():
     async def scenario():
         hass, _, _ = await make_frontend()
-        hass.bus.fire("telegram_command", {"chat_id": 9, "command": "/help", "args": []})
+        hass.bus.fire("telegram_command", {"chat_id": 9, "command": "/deal", "args": ["x"]})
         await asyncio.sleep(0.05)
-        assert hass.services.calls[0][2]["parse_mode"] == "plain_text"
+        payload = hass.services.calls[0][2]
+        assert payload["parse_mode"] == "html"
+        assert payload["message"].startswith("<b>")
+
+    run(scenario())
+
+
+def test_a_rejected_html_message_falls_back_to_plain_text():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.services.reject_html = True
+        hass.bus.fire("telegram_command", {"chat_id": 9, "command": "/deal", "args": ["x"]})
+        await asyncio.sleep(0.05)
+
+        assert len(hass.services.calls) == 1
+        payload = hass.services.calls[0][2]
+        assert payload["parse_mode"] == "plain_text"
+        assert "<b>" not in payload["message"]
 
     run(scenario())

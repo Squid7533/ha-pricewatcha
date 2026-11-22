@@ -14,7 +14,8 @@ the account features (watchlist, price alerts) need a free
 - **One sensor per watched product** — current price (monetary, statistics-friendly) plus
   shop, product URL, status, last checked and watched-at as attributes.
 - **`best_deal`** — search, drop accessories, compare each candidate against its *own*
-  price history, return the best value first.
+  price history, and group the offers by capacity and condition (very good / like new /
+  new), so "is it worth paying more?" has a data-backed answer.
 - **Services** for search, price history, tracking a URL, watch/unwatch, alerts and an
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
@@ -46,7 +47,7 @@ lives in **Configure** on the integration.
 | Service | What it does |
 | --- | --- |
 | `pricewatcha.search` | Keyword search; returns `results`. Supports minus terms: `iphone 18 pro -cover -case` |
-| `pricewatcha.best_deal` | Ranked deals with price, historical low/average, discount %, URL |
+| `pricewatcha.best_deal` | Ranked deals with price, condition, history, URL, plus `groups` by capacity and condition |
 | `pricewatcha.price_history` | Low/high/average/trend for one `product_id` |
 | `pricewatcha.track` | Submit a product URL; `watch: true` keeps it |
 | `pricewatcha.watch` / `.unwatch` | Add/remove a product from the watchlist (adds/removes its sensor) |
@@ -65,9 +66,15 @@ Pricewatcha search is keyword AND over a catalog that is heavy on accessories, s
    costs a fraction of its siblings,
 4. de-duplicates offers listed under several URLs,
 5. takes the cheapest `candidates`, fetches each one's price history, and ranks by
-   discount against that product's own average price.
+   discount against that product's own average price,
+6. looks up each shortlisted product page — the search endpoint returns no URL, and
+   some merchants (asgoodasnew) keep the condition ("sehr gut", "wie neu") only in the
+   URL slug.
 
-The result is a shortlist with `vs_average_pct` and `vs_low_pct`, not a single guess.
+The result is a shortlist with `vs_average_pct`, `vs_low_pct` and the dated
+`history` points, plus `groups`: the cheapest offer per capacity and condition. The
+Telegram front-end turns that into the "very good 669 € · good 689 € · like new 699 € ·
+new 889 €" view and a verdict that names the upcharge for a better condition.
 
 ```yaml
 action: pricewatcha.best_deal
@@ -156,13 +163,40 @@ the first chat that writes to the bot becomes the owner and is remembered.
 
 | Command | Does |
 | --- | --- |
-| `/deal iphone 18 pro` | best value, ranked against each product's own history |
+| `/deal iphone 18 pro` | best value, condition, price history, links and a verdict |
 | anything without a slash | same as `/deal` |
-| `/search iphone 18 pro` | raw catalog matches with links |
+| `/search iphone 18 pro` | raw catalog matches with prices and shops |
 | `/track <url>` | track a URL and watch it |
 | `/watch <product_id>` | watch a catalog product |
 | `/alerts` | your price alerts |
 | `/help` | the command list |
+
+A `/deal` reply looks like this (bold prices and links render in Telegram):
+
+```
+iphone air wolkenweiß — 14 matches · 10 compared
+
+1. 669 € · Asgoodasnew · very good
+Apple iPhone Air 256GB wolkenweiß
+4.3% below its own average (699 €) · lowest recorded price · price falling
+Price history: 13.10. 739 € → 15.10. 719 € → 03.11. 699 € → 18.11. 669 €
+See offer
+
+2. 699 € · Asgoodasnew · like new
+...
+
+Prices by condition
+256 GB: very good 669 € · good 689 € · like new 699 € · new 889 €
+512 GB: very good 769 € · like new 819 € · new 1 019 €
+
+Verdict: Best value: 669 € (very good) at Asgoodasnew, 4.3% below its own average,
+the lowest price recorded for this variant. New costs 220 € more, like new 30 € more.
+Like new is usually the best compromise.
+```
+
+The condition is read from the product name or, where the merchant only encodes it
+there, from the URL slug; an offer with no stated condition is shown as `unrated`
+instead of being guessed as new.
 
 **Price drops push on their own** once a chat is known: when a watched product falls by at
 least the threshold, the bot sends the new price, the old one and the link. The threshold
@@ -194,10 +228,11 @@ the Telegram app. Typing the commands works regardless.
 **Every reply arrives twice.** Both the built-in front-end and `examples/telegram.yaml` are
 active — remove the package and restart.
 
-**Telegram replies fail with `Can't parse entities`.** The bot entry is configured for
-HTML or MarkdownV2, which rejects ordinary text such as `(7.5%)` or `1.`. The integration
-always sends `parse_mode: plain_text`, so this is fixed from 0.3.3 onwards — no change to
-your bot settings is needed. Links stay clickable because Telegram auto-links URLs.
+**Telegram replies fail with `Can't parse entities`.** The integration sends
+`parse_mode: HTML` for bold prices and tappable links, and escapes every product name,
+shop and URL it prints. If Telegram still rejects a message, the integration retries the
+same text as `plain_text`, so the reply arrives either way; the debug log shows the
+error. Please report the product name that broke it.
 
 **A repair says `target` is deprecated for `telegram_bot.send_message`.** The integration
 already picks `chat_id` or `target` from the service schema at runtime, so it keeps working
@@ -210,7 +245,10 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
 ## Quotas and behaviour
 
 - One watchlist request per poll interval regardless of how many products you watch.
-- `best_deal` costs one search plus one price-history request per candidate (default 10).
+- `best_deal` costs one search, plus one price-history and one product request per
+  candidate (about 20 requests for the default 10). The API also enforces an hourly
+  read budget; when it runs out, the reply says that links or history are missing
+  ("rate limit") instead of presenting a thinner shortlist as complete.
 - Authenticated read quota is roughly 3000 requests/day, so a 30-minute interval with
   occasional searches is far inside it.
 - Only watched products are refreshed by Pricewatcha's scheduler; a one-shot `track`
