@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.4.5"
+VERSION: Final = "0.4.6"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -21,10 +21,14 @@ CONF_API_KEY: Final = "api_key"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_TELEGRAM_MIN_DROP: Final = "telegram_min_drop_pct"
 CONF_TELEGRAM_PHOTOS: Final = "telegram_photos"
+CONF_CONVERSATION_TTL_DAYS: Final = "conversation_ttl_days"
 
 DEFAULT_SCAN_INTERVAL: Final = 30  # minutes
 DEFAULT_TELEGRAM_MIN_DROP: Final = 2.0  # percent
 DEFAULT_TELEGRAM_PHOTOS: Final = True
+DEFAULT_CONVERSATION_TTL_DAYS: Final = 7
+MIN_CONVERSATION_TTL_DAYS: Final = 3
+MAX_CONVERSATION_TTL_DAYS: Final = 7
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 1440
 
@@ -175,6 +179,6 @@ def resolved_search_provider(options: dict[str, object] | None) -> str:
 # Persistent per-chat conversation memory (3d)
 CONVERSATION_STORAGE_VERSION: Final = 1
 CONVERSATION_STORAGE_KEY: Final = f"{DOMAIN}.conversations"
-CONVERSATION_TTL_SECONDS: Final = 24 * 3600
+CONVERSATION_TTL_SECONDS: Final = DEFAULT_CONVERSATION_TTL_DAYS * 24 * 3600
 CONVERSATION_HISTORY_MAX: Final = 4
 CONVERSATION_TEXT_MAX: Final = 600

@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 127 tests pass.
+breaks the deterministic reply; 128 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,13 +140,14 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 127 tests pass.
+blocked shop sends no photo and no error; 128 tests pass.
 
 ## 3d — conversation memory (done in 0.4.5)
 
 The last deal, the AI assessment and the last four question/answer pairs are stored per
-chat in `config/.storage/pricewatcha.conversations` (Store, version 1). A 24-hour TTL is
-applied on load and on save; `/reset` clears the chat, and a new `/deal` starts a fresh
+chat in `config/.storage/pricewatcha.conversations` (Store, version 1). The TTL is
+configurable under General between **3 and 7 days** (default 7) and is applied on load,
+on save and before every use; `/reset` clears the chat, and a new `/deal` starts a fresh
 conversation.
 
 - `/ask` works after a Home Assistant restart without a new search.
@@ -159,8 +160,9 @@ conversation.
   keys or Home Assistant state.
 
 **Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
-it and `/ask` asks for a new `/deal`; entries older than 24 hours are ignored; free text
-"ist 669 gut?" is a follow-up while "iphone 15 pro" searches; 127 tests pass.
+it and `/ask` asks for a new `/deal`; entries older than the configured 3–7 days are
+ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
+128 tests pass.
 
 ## Release plan
 
@@ -171,4 +173,5 @@ it and `/ask` asks for a new `/deal`; entries older than 24 hours are ignored; f
 | 3a.2 | 0.4.2 | `/ask` may reason about future sales; DeepSeek web search with sources |
 | 3b | 0.4.3 | provider-neutral `/ask` search: DuckDuckGo default, optional SearXNG |
 | 3c | 0.4.4 | product photos / condition |
-| 3d | 0.4.5 | persistent conversation memory (24 h, `/reset`) |
+| 3d | 0.4.5 | persistent conversation memory (`/reset`) |
+| 3d.1 | 0.4.6 | conversation TTL configurable 3–7 days, default 7 |

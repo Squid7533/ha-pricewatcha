@@ -28,6 +28,7 @@ from .const import (
     CONF_AI_TIMEOUT,
     CONF_AI_WEB_SEARCH,
     CONF_API_KEY,
+    CONF_CONVERSATION_TTL_DAYS,
     CONF_LANGUAGE,
     CONF_SEARXNG_URL,
     CONF_SCAN_INTERVAL,
@@ -46,13 +47,16 @@ from .const import (
     DEFAULT_AI_TEMPERATURE,
     DEFAULT_AI_TIMEOUT,
     DEFAULT_AI_WEB_SEARCH,
+    DEFAULT_CONVERSATION_TTL_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
     DEFAULT_TELEGRAM_PHOTOS,
     DEFAULT_WEB_SEARCH_PROVIDER,
     DOMAIN,
     language_of,
+    MAX_CONVERSATION_TTL_DAYS,
     MAX_SCAN_INTERVAL,
+    MIN_CONVERSATION_TTL_DAYS,
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import async_validate_api_key
@@ -183,6 +187,21 @@ class PricewatchaOptionsFlow(OptionsFlow):
                             min=MIN_SCAN_INTERVAL,
                             max=MAX_SCAN_INTERVAL,
                             unit_of_measurement="min",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_CONVERSATION_TTL_DAYS,
+                        default=self.config_entry.options.get(
+                            CONF_CONVERSATION_TTL_DAYS,
+                            DEFAULT_CONVERSATION_TTL_DAYS,
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_CONVERSATION_TTL_DAYS,
+                            max=MAX_CONVERSATION_TTL_DAYS,
+                            step=1,
+                            unit_of_measurement="days",
                             mode=selector.NumberSelectorMode.BOX,
                         )
                     ),

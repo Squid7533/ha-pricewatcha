@@ -826,7 +826,7 @@ def test_an_expired_conversation_is_not_restored():
 
         stored = FakeStore.values[telegram_module.CONVERSATION_STORAGE_KEY]
         stored["chats"]["1"]["updated_at"] = (
-            time.time() - telegram_module.CONVERSATION_TTL_SECONDS - 1
+            time.time() - frontend._memory_ttl - 1
         )
 
         advisor = FakeAdvisor()
@@ -872,12 +872,39 @@ def test_an_expired_conversation_is_not_used_in_the_same_session():
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
         await asyncio.sleep(0.05)
         frontend._memory_updated[1] = (
-            time.time() - telegram_module.CONVERSATION_TTL_SECONDS - 1
+            time.time() - frontend._memory_ttl - 1
         )
 
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
         await asyncio.sleep(0.05)
 
+        assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_the_configured_ttl_is_used():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass = FakeHass()
+        frontend = TelegramFrontend(
+            hass,
+            FakeCoordinator(),
+            2.0,
+            advisor=advisor,
+            language="de",
+            conversation_ttl_days=3,
+        )
+        await frontend.async_start()
+        assert frontend._memory_ttl == 3 * 24 * 3600
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        frontend._memory_updated[1] = time.time() - 3.5 * 24 * 3600
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
         assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
 
     run(scenario())

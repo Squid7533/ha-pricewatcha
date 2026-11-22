@@ -42,7 +42,8 @@
           "language": "Language",
           "scan_interval": "Poll interval (minutes)",
           "telegram_min_drop_pct": "Minimum drop to notify (%)",
-          "telegram_photos": "Send a product photo with /deal"
+          "telegram_photos": "Send a product photo with /deal",
+          "conversation_ttl_days": "Conversation memory (days)"
         }
       },
       "ai": {

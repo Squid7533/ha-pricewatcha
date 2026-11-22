@@ -27,7 +27,7 @@ from .const import (
     CONVERSATION_STORAGE_KEY,
     CONVERSATION_STORAGE_VERSION,
     CONVERSATION_TEXT_MAX,
-    CONVERSATION_TTL_SECONDS,
+    DEFAULT_CONVERSATION_TTL_DAYS,
     DOMAIN,
     EVENT_PRICE_CHANGED,
 )
@@ -113,12 +113,14 @@ class TelegramFrontend:
         advisor: AIAdvisor | None = None,
         language: str | None = None,
         photos: bool = False,
+        conversation_ttl_days: int = DEFAULT_CONVERSATION_TTL_DAYS,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
         self._min_drop_pct = min_drop_pct
         self._advisor = advisor
         self._photos = photos
+        self._memory_ttl = max(1, int(conversation_ttl_days)) * 24 * 3600
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
@@ -256,7 +258,7 @@ class TelegramFrontend:
                 updated = float(entry.get("updated_at") or 0)
             except (TypeError, ValueError):
                 updated = 0.0
-            if now - updated > CONVERSATION_TTL_SECONDS:
+            if now - updated > self._memory_ttl:
                 continue
             chat_id = int(raw_chat)
             deal = entry.get("deal")
@@ -280,7 +282,7 @@ class TelegramFrontend:
             chats: dict[str, dict[str, Any]] = {}
             for chat_id, deal in self._last_deals.items():
                 updated = self._memory_updated.get(chat_id, now)
-                if now - updated > CONVERSATION_TTL_SECONDS:
+                if now - updated > self._memory_ttl:
                     continue
                 entry: dict[str, Any] = {"updated_at": updated, "deal": deal}
                 assessment = self._last_assessments.get(chat_id)
@@ -298,7 +300,7 @@ class TelegramFrontend:
     def _deal_for(self, chat_id: int) -> dict[str, Any] | None:
         """The stored deal, unless it is older than the conversation TTL."""
         updated = self._memory_updated.get(chat_id)
-        if updated is not None and time.time() - updated > CONVERSATION_TTL_SECONDS:
+        if updated is not None and time.time() - updated > self._memory_ttl:
             self._last_deals.pop(chat_id, None)
             self._last_assessments.pop(chat_id, None)
             self._last_history.pop(chat_id, None)

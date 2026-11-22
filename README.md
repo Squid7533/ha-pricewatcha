@@ -266,7 +266,7 @@ sent to the provider you chose — no Home Assistant states, entities or locatio
 web search on, the question also goes to DeepSeek, DuckDuckGo or your SearXNG instance.
 For the product photo, Home Assistant fetches the merchant page and uploads the image to
 Telegram. The chat memory (last deal, assessment, questions) is stored in
-`config/.storage/pricewatcha.conversations` for 24 hours. The key is stored in Home
+`config/.storage/pricewatcha.conversations` for 3–7 days (default 7). The key is stored in Home
 Assistant's `.storage` in plain text, as with other integration settings; a local model
 avoids the model provider, but not the search query.
 

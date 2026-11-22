@@ -11,7 +11,9 @@ from .api import PricewatchaClient
 from .const import (
     CONF_API_KEY,
     CONF_TELEGRAM_MIN_DROP,
+    CONF_CONVERSATION_TTL_DAYS,
     CONF_TELEGRAM_PHOTOS,
+    DEFAULT_CONVERSATION_TTL_DAYS,
     DEFAULT_TELEGRAM_MIN_DROP,
     DEFAULT_TELEGRAM_PHOTOS,
     DOMAIN,
@@ -43,6 +45,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
         advisor=AIAdvisor(hass, AIConfig.from_options(entry.options)),
         language=language_of(entry.options),
         photos=bool(entry.options.get(CONF_TELEGRAM_PHOTOS, DEFAULT_TELEGRAM_PHOTOS)),
+        conversation_ttl_days=int(
+            entry.options.get(
+                CONF_CONVERSATION_TTL_DAYS, DEFAULT_CONVERSATION_TTL_DAYS
+            )
+        ),
     )
     await frontend.async_start()
 
