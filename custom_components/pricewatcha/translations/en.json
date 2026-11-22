@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Pricewatcha",
+        "description": "Paste your Pricewatcha API key. Create one at {profile_url} — it is shown only once.",
+        "data": {
+          "api_key": "API key"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Renew Pricewatcha access",
+        "description": "The previous API key no longer works. Paste a new one.",
+        "data": {
+          "api_key": "API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "That API key was rejected. Check it was copied in full.",
+      "cannot_connect": "Could not reach pricewatcha.com. Try again in a moment.",
+      "rate_limited": "Pricewatcha is rate limiting this client. Wait a minute and retry.",
+      "unknown": "Unexpected error while talking to Pricewatcha."
+    },
+    "abort": {
+      "already_configured": "Pricewatcha is already set up.",
+      "reauth_successful": "The API key was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pricewatcha options",
+        "data": {
+          "scan_interval": "Poll interval (minutes)"
+        }
+      }
+    }
+  }
+}

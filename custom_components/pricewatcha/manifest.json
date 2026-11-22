@@ -1,0 +1,13 @@
+{
+  "domain": "pricewatcha",
+  "name": "Pricewatcha",
+  "codeowners": ["@samuelengelking"],
+  "config_flow": true,
+  "documentation": "https://github.com/samuelengelking/ha-pricewatcha",
+  "issue_tracker": "https://github.com/samuelengelking/ha-pricewatcha/issues",
+  "iot_class": "cloud_polling",
+  "integration_type": "hub",
+  "loggers": ["custom_components.pricewatcha"],
+  "requirements": [],
+  "version": "0.1.0"
+}

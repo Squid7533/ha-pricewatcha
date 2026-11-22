@@ -1,0 +1,209 @@
+search:
+  name: Search products
+  description: Keyword search over the Pricewatcha catalog and return the matching products.
+  fields:
+    query:
+      required: true
+      example: "iphone 18 pro -cover -case"
+      selector:
+        text:
+    limit:
+      required: false
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 200
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+best_deal:
+  name: Find best deals
+  description: >-
+    Search, drop accessories, compare each candidate against its own price history and
+    return the best value first. Use this for questions like "find the best deal for
+    iPhone 18 Pro".
+  fields:
+    query:
+      required: true
+      example: "iphone 18 pro"
+      selector:
+        text:
+    limit:
+      required: false
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 20
+    candidates:
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 30
+    max_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    include_accessories:
+      required: false
+      default: false
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+price_history:
+  name: Get price history
+  description: Historical prices, low/high/average and trend for one product.
+  fields:
+    product_id:
+      required: true
+      example: prod_ONgO0IjXa7YnqQ
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+track:
+  name: Track a product URL
+  description: Submit a product page URL; optionally keep it on the watchlist.
+  fields:
+    url:
+      required: true
+      example: https://www.ebay.de/itm/227592292621
+      selector:
+        text:
+    watch:
+      required: false
+      default: false
+      selector:
+        boolean:
+    refresh:
+      required: false
+      default: false
+      selector:
+        boolean:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+watch:
+  name: Watch a product
+  description: Add a catalog product to the watchlist so it keeps updating (creates a sensor).
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+unwatch:
+  name: Stop watching a product
+  description: Remove a product from the watchlist and remove its sensor.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+list_alerts:
+  name: List price alerts
+  description: List the account's price alerts, optionally for one product.
+  fields:
+    product_id:
+      required: false
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+create_alert:
+  name: Create price alert
+  description: >-
+    Create a price alert. Any one of notify_on_drop, notify_on_rise, min_threshold_price
+    or max_threshold_price is enough. Creating an alert also watches the product.
+  fields:
+    product_id:
+      required: true
+      selector:
+        text:
+    notify_on_drop:
+      required: false
+      default: false
+      selector:
+        boolean:
+    notify_on_rise:
+      required: false
+      default: false
+      selector:
+        boolean:
+    min_threshold_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    max_threshold_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    notify_email:
+      required: false
+      default: false
+      selector:
+        boolean:
+    name:
+      required: false
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+delete_alert:
+  name: Delete price alert
+  description: Delete one price alert by id.
+  fields:
+    alert_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+refresh:
+  name: Refresh now
+  description: Poll the watchlist immediately instead of waiting for the interval.
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        text:
