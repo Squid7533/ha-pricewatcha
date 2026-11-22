@@ -19,6 +19,8 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, EVENT_PRICE_CHANGED
 from .format import (
+    format_ai_section,
+    format_ai_unavailable,
     format_alerts,
     format_deals,
     format_help,
@@ -31,6 +33,7 @@ from .format import (
 )
 
 if TYPE_CHECKING:
+    from .ai import AIAdvisor
     from .coordinator import PricewatchaCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,6 +51,7 @@ ISSUE_NO_ALLOWED_CHAT = "telegram_no_allowed_chat"
 # Shown in Telegram's "/" menu once registered with the Bot API.
 BOT_COMMANDS = [
     ("deal", "Best deal for a product"),
+    ("ask", "Ask about your last deal"),
     ("search", "Search the product catalog"),
     ("track", "Track a product URL"),
     ("watch", "Watch a product id"),
@@ -76,10 +80,13 @@ class TelegramFrontend:
         hass: HomeAssistant,
         coordinator: PricewatchaCoordinator,
         min_drop_pct: float,
+        advisor: AIAdvisor | None = None,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
         self._min_drop_pct = min_drop_pct
+        self._advisor = advisor
+        self._last_deals: dict[int, dict[str, Any]] = {}
         self._chat_ids: list[int] = []
         self._store: Store[dict[str, Any]] | None = None
         self._unsubscribers: list[Any] = []
@@ -292,6 +299,8 @@ class TelegramFrontend:
             await self._async_send(chat_id, format_help())
         elif command == "/deal":
             await self._async_deals(chat_id, rest)
+        elif command == "/ask":
+            await self._async_ask(chat_id, rest)
         elif command == "/search":
             await self._async_search(chat_id, rest)
         elif command == "/track":
@@ -333,6 +342,62 @@ class TelegramFrontend:
             await self._async_send(chat_id, f"Pricewatcha error: {err}")
             return
         await self._async_send(chat_id, format_deals(payload))
+        if not payload.get("deals"):
+            return
+        self._last_deals[chat_id] = payload
+
+        # The table is already delivered; the assessment is a second message so a
+        # slow model never delays the facts.
+        if self._advisor is not None and self._advisor.available:
+            try:
+                result = await self._advisor.async_advise(payload)
+            except Exception:  # noqa: BLE001 - the table is already delivered
+                _LOGGER.debug("AI assessment failed", exc_info=True)
+                result = None
+            if result is not None:
+                await self._async_send(
+                    chat_id, format_ai_section(result, self._advisor.language)
+                )
+
+    async def _async_ask(self, chat_id: int, question: str) -> None:
+        language = self._advisor.language if self._advisor is not None else "de"
+        if not question:
+            await self._async_send(chat_id, format_usage("/ask", "is 669 a good price?"))
+            return
+        if self._advisor is None or not self._advisor.available:
+            reason = (
+                "Richte unter Einstellungen → Geräte & Dienste → Pricewatcha → "
+                "Konfigurieren → KI-Assistent einen Anbieter, ein Modell und einen "
+                "Schlüssel ein."
+                if language == "de"
+                else "Configure a provider, model and key under Settings → Devices & "
+                "services → Pricewatcha → Configure → AI assistant."
+            )
+            await self._async_send(chat_id, format_ai_unavailable(reason, language))
+            return
+
+        payload = self._last_deals.get(chat_id)
+        if payload is None:
+            message = (
+                "Starte zuerst /deal, damit ich die Angebote kenne."
+                if language == "de"
+                else "Run /deal first so I know which offers to talk about."
+            )
+            await self._async_send(chat_id, format_ai_unavailable(message, language))
+            return
+
+        try:
+            result = await self._advisor.async_advise(payload, question)
+        except Exception:  # noqa: BLE001 - never leave /ask without an answer
+            _LOGGER.debug("AI question failed", exc_info=True)
+            result = None
+        if result is None:
+            reason = self._advisor.last_error or "provider_error"
+            await self._async_send(chat_id, format_ai_unavailable(reason, language))
+            return
+        await self._async_send(
+            chat_id, format_ai_section(result, language, answer=True)
+        )
 
     async def _async_search(self, chat_id: int, query: str) -> None:
         if not query:

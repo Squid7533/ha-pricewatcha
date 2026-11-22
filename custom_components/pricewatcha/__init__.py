@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .ai import AIAdvisor, AIConfig
 from .api import PricewatchaClient
 from .const import (
     CONF_API_KEY,
@@ -36,6 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
         hass,
         coordinator,
         float(entry.options.get(CONF_TELEGRAM_MIN_DROP, DEFAULT_TELEGRAM_MIN_DROP)),
+        advisor=AIAdvisor(hass, AIConfig.from_options(entry.options)),
     )
     await frontend.async_start()
 

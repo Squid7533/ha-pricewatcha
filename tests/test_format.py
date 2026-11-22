@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from custom_components.pricewatcha.format import (
+    format_ai_section,
+    format_ai_unavailable,
     format_alerts,
     format_deals,
     format_help,
@@ -287,7 +291,7 @@ def test_to_plain_strips_tags_and_keeps_the_link_target():
 
 def test_help_lists_commands():
     text = format_help()
-    for command in ("/deal", "/search", "/track", "/watch", "/alerts"):
+    for command in ("/deal", "/ask", "/search", "/track", "/watch", "/alerts"):
         assert command in text
 
 
@@ -314,3 +318,25 @@ def test_partial_data_is_announced():
     }
     text = format_deals(payload)
     assert "Some offer links could not be loaded (rate limit); try again in a moment." in text
+
+
+def test_ai_section_is_german_and_escaped():
+    result = SimpleNamespace(
+        text="669 € sind gut & <b>fair</b>.", model="deepseek-flash", spent_today=0.0021
+    )
+    text = format_ai_section(result, "de")
+    assert "<b>Einschätzung</b>" in text
+    assert "669 € sind gut &amp; &lt;b&gt;fair&lt;/b&gt;." in text
+    assert "deepseek-flash · 0.0021 $ heute" in text
+
+
+def test_ai_section_english_and_answer_label():
+    result = SimpleNamespace(text="Good.", model="m", spent_today=0.01)
+    text = format_ai_section(result, "en", answer=True)
+    assert "<b>Answer</b>" in text
+    assert "m · $0.0100 today" in text
+
+
+def test_ai_unavailable_is_explained():
+    assert "KI nicht verfügbar" in format_ai_unavailable("kein Budget", "de")
+    assert "AI unavailable" in format_ai_unavailable("no budget", "en")

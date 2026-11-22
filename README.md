@@ -19,8 +19,11 @@ the account features (watchlist, price alerts) need a free
 - **Services** for search, price history, tracking a URL, watch/unwatch, alerts and an
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
-- **Telegram commands** — `/deal`, `/search`, `/track`, `/watch`, `/alerts` from your phone,
-  plus price-drop pushes, with no YAML and no chat id to look up.
+- **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts` from
+  your phone, plus price-drop pushes, with no YAML and no chat id to look up.
+- **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
+  OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
+  plus `/ask` follow-ups. Off by default; the deterministic answer never depends on it.
 - **Config flow** — paste the key once in the UI; reauth is supported when you rotate it.
 
 ## Install
@@ -164,6 +167,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | Command | Does |
 | --- | --- |
 | `/deal iphone 18 pro` | best value, condition, price history, links and a verdict |
+| `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
 | anything without a slash | same as `/deal` |
 | `/search iphone 18 pro` | raw catalog matches with prices and shops |
 | `/track <url>` | track a URL and watch it |
@@ -197,6 +201,39 @@ Like new is usually the best compromise.
 The condition is read from the product name or, where the merchant only encodes it
 there, from the URL slug; an offer with no stated condition is shown as `unrated`
 instead of being guessed as new.
+
+### AI assessment (optional)
+
+The advisor is presentation only: it receives the same structured deal data the table
+is built from and writes a short assessment. The table is always sent; if the model
+fails, times out, runs out of budget or invents a price that is not in the data, only
+the AI paragraph is dropped.
+
+Configure it under **Settings → Devices & services → Pricewatcha → Configure → AI
+assistant**:
+
+| Setting | Notes |
+| --- | --- |
+| Provider | `OpenAI-compatible` covers DeepSeek, OpenAI, Ollama, LM Studio, vLLM, OpenRouter, Groq; `Anthropic` uses the messages API |
+| Base URL | DeepSeek `https://api.deepseek.com`, OpenAI `https://api.openai.com/v1`, Anthropic `https://api.anthropic.com`, Ollama `http://192.168.1.10:11434/v1` |
+| Model | Free text. DeepSeek preset is `deepseek-flash`; Ollama e.g. `llama3.1` |
+| API key | Your own key; leave empty for a local server |
+| Answer language | German or English |
+| Budgets | USD per day and per month, checked before every call; `0` means no limit |
+
+DeepSeek is the default preset because it is cheap and OpenAI-compatible. For
+`deepseek-flash` the integration disables thinking mode (a short assessment does not
+need it) and reports the spend in the footer of each AI message, e.g.
+`deepseek-flash · 0.0006 $ heute`. A typical answer costs a fraction of a cent.
+
+For a self-hosted model, remember that `localhost` inside the Home Assistant container
+is not your workstation: use the host's LAN address, or the add-on's internal URL when
+Ollama runs as a Home Assistant add-on. Local servers usually need no key.
+
+Privacy: only the product name, prices, shops, conditions and your `/ask` question are
+sent to the provider you chose — no Home Assistant states, entities or location. The
+key is stored in Home Assistant's `.storage` in plain text, as with other integration
+settings; a local model avoids that.
 
 **Price drops push on their own** once a chat is known: when a watched product falls by at
 least the threshold, the bot sends the new price, the old one and the link. The threshold
@@ -257,8 +294,11 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
 
 ## Not (yet) included
 
-- **Assist intents** — planned for 0.4.0, so a Claude/OpenAI conversation agent can call
-  `best_deal` straight from a chat instead of the `/deal` command.
+- **Assist intents** — the AI advisor is Telegram-only for now; a conversation agent
+  that calls `best_deal` directly is not wired up yet.
+- **Offers outside the Pricewatcha catalog** (Saturn, MediaMarkt, idealo) — planned as
+  3b, together with photos (3c) and persistent chat memory (3d). See
+  [docs/phase3.md](docs/phase3.md).
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.3.4"
+VERSION: Final = "0.4.0"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -89,3 +89,45 @@ SEARCH_EXCLUDES: Final = (
     "-bag",
     "-sling",
 )
+
+# --- optional AI advisor -----------------------------------------------------
+# The advisor is presentation only: it receives the deterministic best_deal data
+# and writes a short assessment. It is off by default; Pricewatcha works without it.
+CONF_AI_ENABLED = "ai_enabled"
+CONF_AI_PROVIDER = "ai_provider"
+CONF_AI_BASE_URL = "ai_base_url"
+CONF_AI_MODEL = "ai_model"
+CONF_AI_API_KEY = "ai_api_key"
+CONF_AI_LANGUAGE = "ai_language"
+CONF_AI_MAX_TOKENS = "ai_max_tokens"
+CONF_AI_TEMPERATURE = "ai_temperature"
+CONF_AI_TIMEOUT = "ai_timeout"
+CONF_AI_INPUT_COST = "ai_input_cost_per_mtok"
+CONF_AI_OUTPUT_COST = "ai_output_cost_per_mtok"
+CONF_AI_DAILY_BUDGET = "ai_daily_budget_usd"
+CONF_AI_MONTHLY_BUDGET = "ai_monthly_budget_usd"
+
+AI_PROVIDER_OPENAI = "openai_compatible"
+AI_PROVIDER_ANTHROPIC = "anthropic"
+AI_PROVIDERS: Final = (AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC)
+
+DEFAULT_AI_ENABLED: Final = False
+DEFAULT_AI_PROVIDER: Final = AI_PROVIDER_OPENAI
+# DeepSeek is the default because it is OpenAI-compatible, cheap and the model
+# name is stable; every other provider is just a different base_url/model.
+DEFAULT_AI_BASE_URL: Final = "https://api.deepseek.com"
+DEFAULT_AI_MODEL: Final = "deepseek-flash"
+DEFAULT_AI_LANGUAGE: Final = "de"
+DEFAULT_AI_MAX_TOKENS: Final = 700
+DEFAULT_AI_TEMPERATURE: Final = 0.3
+DEFAULT_AI_TIMEOUT: Final = 30
+# deepseek-flash peak input/output, USD per 1M tokens. Peak rates are used as
+# the default so a budget estimate never under-spends; off-peak is half. Users of
+# other providers adjust these; 0 means "free/unknown" and never triggers a budget.
+DEFAULT_AI_INPUT_COST: Final = 0.30
+DEFAULT_AI_OUTPUT_COST: Final = 1.20
+DEFAULT_AI_DAILY_BUDGET: Final = 1.0
+DEFAULT_AI_MONTHLY_BUDGET: Final = 10.0
+
+AI_USAGE_STORAGE_VERSION: Final = 1
+AI_USAGE_STORAGE_KEY: Final = f"{DOMAIN}.ai_usage"

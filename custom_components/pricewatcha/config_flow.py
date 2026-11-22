@@ -14,9 +14,34 @@ from homeassistant.helpers import selector
 
 from .api import PricewatchaApiError, PricewatchaAuthError, PricewatchaRateLimitError
 from .const import (
+    CONF_AI_API_KEY,
+    CONF_AI_BASE_URL,
+    CONF_AI_DAILY_BUDGET,
+    CONF_AI_ENABLED,
+    CONF_AI_INPUT_COST,
+    CONF_AI_LANGUAGE,
+    CONF_AI_MAX_TOKENS,
+    CONF_AI_MODEL,
+    CONF_AI_MONTHLY_BUDGET,
+    CONF_AI_OUTPUT_COST,
+    CONF_AI_PROVIDER,
+    CONF_AI_TEMPERATURE,
+    CONF_AI_TIMEOUT,
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
     CONF_TELEGRAM_MIN_DROP,
+    DEFAULT_AI_BASE_URL,
+    DEFAULT_AI_DAILY_BUDGET,
+    DEFAULT_AI_ENABLED,
+    DEFAULT_AI_INPUT_COST,
+    DEFAULT_AI_LANGUAGE,
+    DEFAULT_AI_MAX_TOKENS,
+    DEFAULT_AI_MODEL,
+    DEFAULT_AI_MONTHLY_BUDGET,
+    DEFAULT_AI_OUTPUT_COST,
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_AI_TEMPERATURE,
+    DEFAULT_AI_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
     DOMAIN,
@@ -109,14 +134,24 @@ class PricewatchaConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PricewatchaOptionsFlow(OptionsFlow):
-    """Poll interval only; everything else lives on the services."""
+    """General polling options plus the optional AI advisor."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["general", "ai"],
+        )
+
+    async def async_step_general(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(
+                title="", data={**self.config_entry.options, **user_input}
+            )
 
         return self.async_show_form(
-            step_id="init",
+            step_id="general",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
@@ -148,4 +183,169 @@ class PricewatchaOptionsFlow(OptionsFlow):
                     ),
                 }
             ),
+        )
+
+    async def async_step_ai(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        options = self.config_entry.options
+        current = {**options, **(user_input or {})}
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            cleaned = dict(user_input)
+            for key in (CONF_AI_API_KEY, CONF_AI_BASE_URL, CONF_AI_MODEL):
+                if key in cleaned:
+                    cleaned[key] = str(cleaned[key] or "").strip()
+            if cleaned.get(CONF_AI_ENABLED):
+                base_url = str(cleaned.get(CONF_AI_BASE_URL) or "")
+                if not base_url.startswith(("http://", "https://")):
+                    errors[CONF_AI_BASE_URL] = "invalid_url"
+                if not str(cleaned.get(CONF_AI_MODEL) or "").strip():
+                    errors[CONF_AI_MODEL] = "invalid_model"
+            if not errors:
+                return self.async_create_entry(
+                    title="", data={**options, **cleaned}
+                )
+
+        return self.async_show_form(
+            step_id="ai",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_AI_ENABLED,
+                        default=current.get(CONF_AI_ENABLED, DEFAULT_AI_ENABLED),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_AI_PROVIDER,
+                        default=current.get(CONF_AI_PROVIDER, DEFAULT_AI_PROVIDER),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": "openai_compatible",
+                                    "label": "OpenAI-compatible (DeepSeek, OpenAI, Ollama, ...)",
+                                },
+                                {
+                                    "value": "anthropic",
+                                    "label": "Anthropic (Claude)",
+                                },
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_BASE_URL,
+                        default=current.get(CONF_AI_BASE_URL, DEFAULT_AI_BASE_URL),
+                    ): selector.TextSelector(),
+                    vol.Optional(
+                        CONF_AI_MODEL,
+                        default=current.get(CONF_AI_MODEL, DEFAULT_AI_MODEL),
+                    ): selector.TextSelector(),
+                    vol.Optional(
+                        CONF_AI_API_KEY,
+                        default=current.get(CONF_AI_API_KEY, ""),
+                    ): API_KEY_SELECTOR,
+                    vol.Optional(
+                        CONF_AI_LANGUAGE,
+                        default=current.get(CONF_AI_LANGUAGE, DEFAULT_AI_LANGUAGE),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"value": "de", "label": "Deutsch"},
+                                {"value": "en", "label": "English"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_MAX_TOKENS,
+                        default=current.get(CONF_AI_MAX_TOKENS, DEFAULT_AI_MAX_TOKENS),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=100,
+                            max=4000,
+                            step=50,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_TEMPERATURE,
+                        default=current.get(
+                            CONF_AI_TEMPERATURE, DEFAULT_AI_TEMPERATURE
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=2,
+                            step=0.1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_TIMEOUT,
+                        default=current.get(CONF_AI_TIMEOUT, DEFAULT_AI_TIMEOUT),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=5,
+                            max=120,
+                            unit_of_measurement="s",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_INPUT_COST,
+                        default=current.get(CONF_AI_INPUT_COST, DEFAULT_AI_INPUT_COST),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            step=0.01,
+                            unit_of_measurement="USD / 1M tokens",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_OUTPUT_COST,
+                        default=current.get(
+                            CONF_AI_OUTPUT_COST, DEFAULT_AI_OUTPUT_COST
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            step=0.01,
+                            unit_of_measurement="USD / 1M tokens",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_DAILY_BUDGET,
+                        default=current.get(
+                            CONF_AI_DAILY_BUDGET, DEFAULT_AI_DAILY_BUDGET
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=1000,
+                            step=0.01,
+                            unit_of_measurement="USD",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AI_MONTHLY_BUDGET,
+                        default=current.get(
+                            CONF_AI_MONTHLY_BUDGET, DEFAULT_AI_MONTHLY_BUDGET
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=10000,
+                            step=0.01,
+                            unit_of_measurement="USD",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
         )

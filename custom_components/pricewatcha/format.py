@@ -133,6 +133,7 @@ def format_help() -> str:
     return (
         "Pricewatcha commands:\n\n"
         "/deal iphone 18 pro — best value, ranked against each product's own price history\n"
+        "/ask is 669 a good price? — ask the AI about your last deal\n"
         "/search iphone 18 pro — raw catalog matches\n"
         "/track <product url> — track a URL and watch it\n"
         "/watch <product_id> — watch a catalog product\n"
@@ -406,3 +407,59 @@ def format_price_drop(data: dict[str, Any]) -> str:
 
 def format_usage(command: str, example: str) -> str:
     return f"Usage: {command} {example}"
+
+
+def format_ai_section(
+    result: Any,
+    language: str = "de",
+    *,
+    answer: bool = False,
+) -> str:
+    """The optional AI paragraph: label, grounded text, and what it cost."""
+    german = language == "de"
+    if answer:
+        label = "Antwort" if german else "Answer"
+    else:
+        label = "Einschätzung" if german else "AI take"
+    model = getattr(result, "model", "") or "AI"
+    spent = float(getattr(result, "spent_today", 0.0) or 0.0)
+    footer = (
+        f"{model} · {spent:.4f} $ heute" if german else f"{model} · ${spent:.4f} today"
+    )
+    return (
+        f"<b>{label}</b>\n{_esc(getattr(result, 'text', ''))}"
+        f"\n\n<i>{_esc(footer)}</i>"
+    )
+
+
+_AI_REASONS = {
+    "de": {
+        "not_configured": "Die KI ist noch nicht eingerichtet.",
+        "budget_daily": "Das Tagesbudget reicht für diese Anfrage nicht mehr.",
+        "budget_monthly": "Das Monatsbudget reicht für diese Anfrage nicht mehr.",
+        "auth": "Der API-Schlüssel wurde vom Anbieter abgelehnt.",
+        "rate_limit": "Der Anbieter begrenzt gerade die Anfragen. Später erneut versuchen.",
+        "timeout": "Der Anbieter hat nicht rechtzeitig geantwortet.",
+        "empty": "Das Modell hat keine Antwort geliefert.",
+        "unknown_price": "Die Antwort nannte einen Preis, der nicht in den Angebotsdaten steht.",
+        "provider_error": "Der Anbieter hat die Anfrage abgelehnt.",
+    },
+    "en": {
+        "not_configured": "AI is not configured yet.",
+        "budget_daily": "The daily budget does not cover this request any more.",
+        "budget_monthly": "The monthly budget does not cover this request any more.",
+        "auth": "The provider rejected the API key.",
+        "rate_limit": "The provider is rate limiting requests. Try again later.",
+        "timeout": "The provider did not answer in time.",
+        "empty": "The model returned no answer.",
+        "unknown_price": "The answer mentioned a price that is not in the offer data.",
+        "provider_error": "The provider rejected the request.",
+    },
+}
+
+
+def format_ai_unavailable(reason: str, language: str = "de") -> str:
+    german = language == "de"
+    label = "KI nicht verfügbar" if german else "AI unavailable"
+    text = _AI_REASONS["de" if german else "en"].get(reason, reason)
+    return f"<b>{label}</b>\n{_esc(text)}"

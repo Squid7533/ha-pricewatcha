@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.pricewatcha import telegram as telegram_module
+from custom_components.pricewatcha.ai import AIResult
 from custom_components.pricewatcha.telegram import TelegramFrontend
 
 DEALS = {
@@ -144,6 +145,30 @@ class FakeClient:
         return []
 
 
+class FakeAdvisor:
+    """Duck-typed stand-in for AIAdvisor."""
+
+    def __init__(self, text="669 € ist ein guter Preis.", available=True, error=None):
+        self.available = available
+        self.language = "de"
+        self.text = text
+        self.error = error
+        self.last_error = None
+        self.calls: list[tuple[dict, str | None]] = []
+
+    async def async_advise(self, payload, question=None):
+        self.calls.append((payload, question))
+        if self.error:
+            self.last_error = self.error
+            return None
+        return AIResult(
+            text=self.text,
+            model="fake-model",
+            cost_usd=0.0001,
+            spent_today=0.002,
+        )
+
+
 class FakeCoordinator:
     def __init__(self) -> None:
         self.client = FakeClient()
@@ -168,10 +193,10 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def make_frontend(hass=None, min_drop=2.0):
+async def make_frontend(hass=None, min_drop=2.0, advisor=None):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
-    frontend = TelegramFrontend(hass, coordinator, min_drop)
+    frontend = TelegramFrontend(hass, coordinator, min_drop, advisor=advisor)
     await frontend.async_start()
     return hass, coordinator, frontend
 
@@ -380,7 +405,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "search", "track", "watch", "alerts", "help"]
+    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -511,5 +536,102 @@ def test_a_rejected_html_message_falls_back_to_plain_text():
         payload = hass.services.calls[0][2]
         assert payload["parse_mode"] == "plain_text"
         assert "<b>" not in payload["message"]
+
+    run(scenario())
+
+
+def test_deal_appends_an_ai_assessment_after_the_table():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        assert len(hass.services.calls) == 2
+        assert "compared" in hass.services.calls[0][2]["message"]
+        assessment = hass.services.calls[1][2]["message"]
+        assert "<b>Einschätzung</b>" in assessment
+        assert "669 € ist ein guter Preis." in assessment
+        assert "fake-model" in assessment
+        assert len(advisor.calls) == 1
+
+    run(scenario())
+
+
+def test_ask_answers_from_the_last_deal():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/ask", "args": ["ist", "669", "gut?"]},
+        )
+        await asyncio.sleep(0.05)
+
+        assert len(advisor.calls) == 2
+        payload, question = advisor.calls[1]
+        assert payload["query"] == "iphone"
+        assert question == "ist 669 gut?"
+        assert "<b>Antwort</b>" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_ask_without_a_deal_explains_the_order():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        assert advisor.calls == []
+        assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_ask_without_ai_points_at_the_options():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "KI nicht verfügbar" in message
+        assert "Konfigurieren" in message
+
+    run(scenario())
+
+
+def test_ask_reports_why_the_ai_failed():
+    advisor = FakeAdvisor(error="budget_daily")
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        assert "Tagesbudget" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_a_failed_assessment_does_not_spoil_the_deal():
+    advisor = FakeAdvisor(error="timeout")
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        assert len(hass.services.calls) == 1
+        assert "compared" in hass.services.calls[0][2]["message"]
 
     run(scenario())

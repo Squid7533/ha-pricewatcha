@@ -31,11 +31,41 @@
     "step": {
       "init": {
         "title": "Pricewatcha options",
+        "menu_options": {
+          "general": "General",
+          "ai": "AI assistant"
+        }
+      },
+      "general": {
+        "title": "General",
         "data": {
           "scan_interval": "Poll interval (minutes)",
           "telegram_min_drop_pct": "Minimum drop to notify (%)"
         }
+      },
+      "ai": {
+        "title": "AI assistant",
+        "description": "Optional. The AI writes a short assessment below `/deal` and answers `/ask`. It only sees the prices from Pricewatcha, and the deterministic table is always sent too.\n\nExamples: DeepSeek `https://api.deepseek.com` with `deepseek-flash`; OpenAI `https://api.openai.com/v1` with your model; Ollama on your network `http://192.168.1.10:11434/v1` with `llama3.1` and an empty key.\n\nThe key is stored in Home Assistant's `.storage` in plain text, like other integration settings. A budget of 0 means no limit.",
+        "data": {
+          "ai_enabled": "Enable AI assessment",
+          "ai_provider": "Provider",
+          "ai_base_url": "Base URL",
+          "ai_model": "Model",
+          "ai_api_key": "API key (optional for local servers)",
+          "ai_language": "Answer language",
+          "ai_max_tokens": "Maximum answer tokens",
+          "ai_temperature": "Temperature",
+          "ai_timeout": "Request timeout",
+          "ai_input_cost_per_mtok": "Input cost (USD per 1M tokens)",
+          "ai_output_cost_per_mtok": "Output cost (USD per 1M tokens)",
+          "ai_daily_budget_usd": "Daily budget (USD, 0 = no limit)",
+          "ai_monthly_budget_usd": "Monthly budget (USD, 0 = no limit)"
+        }
       }
+    },
+    "error": {
+      "invalid_url": "The base URL must start with http:// or https://.",
+      "invalid_model": "Enter a model name."
     }
   },
   "issues": {
