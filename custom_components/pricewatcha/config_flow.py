@@ -32,6 +32,7 @@ from .const import (
     CONF_SEARXNG_URL,
     CONF_SCAN_INTERVAL,
     CONF_TELEGRAM_MIN_DROP,
+    CONF_TELEGRAM_PHOTOS,
     CONF_WEB_SEARCH_PROVIDER,
     DEFAULT_AI_BASE_URL,
     DEFAULT_AI_DAILY_BUDGET,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_AI_WEB_SEARCH,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
+    DEFAULT_TELEGRAM_PHOTOS,
     DEFAULT_WEB_SEARCH_PROVIDER,
     DOMAIN,
     language_of,
@@ -184,6 +186,12 @@ class PricewatchaOptionsFlow(OptionsFlow):
                             mode=selector.NumberSelectorMode.BOX,
                         )
                     ),
+                    vol.Optional(
+                        CONF_TELEGRAM_PHOTOS,
+                        default=self.config_entry.options.get(
+                            CONF_TELEGRAM_PHOTOS, DEFAULT_TELEGRAM_PHOTOS
+                        ),
+                    ): selector.BooleanSelector(),
                     vol.Optional(
                         CONF_TELEGRAM_MIN_DROP,
                         default=self.config_entry.options.get(

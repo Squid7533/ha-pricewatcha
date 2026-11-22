@@ -25,6 +25,8 @@ the account features (watchlist, price alerts) need a free
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
   plus `/ask` follow-ups with current web results and sources. Off by default; the
   deterministic answer never depends on it.
+- **Product photo** — `/deal` sends the top offer's photo when the merchant page
+  exposes one; a switch under **Configure → General** turns it off.
 - **Config flow** — paste the key once in the UI; reauth is supported when you rotate it.
 
 ## Install
@@ -176,7 +178,9 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/alerts` | your price alerts |
 | `/help` | the command list |
 
-A `/deal` reply looks like this (bold prices and links render in Telegram):
+A `/deal` reply looks like this (bold prices and links render in Telegram). When the
+shop exposes a product image, a photo follows the table — switch it off under
+**Configure → General → Send a product photo with /deal**.
 
 ```
 iphone air wolkenweiß — 14 matches · 10 compared
@@ -237,9 +241,9 @@ For a self-hosted model, remember that `localhost` inside the Home Assistant con
 is not your workstation: use the host's LAN address, or the add-on's internal URL when
 Ollama runs as a Home Assistant add-on. Local servers usually need no key.
 
-DuckDuckGo search needs browser TLS impersonation; the integration therefore declares
-`curl_cffi`, which Home Assistant installs with the update. SearXNG uses plain HTTP and
-needs no extra package.
+DuckDuckGo search and the product-photo page fetch need browser TLS impersonation; the
+integration therefore declares `curl_cffi`, which Home Assistant installs with the
+update. SearXNG uses plain HTTP and needs no extra package.
 
 `/ask` is where future questions belong: the model sees the dated price history and may
 give a reasoned estimate about Black Friday or a next price step, clearly labelled as an
@@ -251,8 +255,9 @@ stricter and only uses catalog prices, so the table stays a fact sheet.
 Privacy: only the product name, prices, shops, conditions and your `/ask` question are
 sent to the provider you chose — no Home Assistant states, entities or location. With
 web search on, the question also goes to DeepSeek, DuckDuckGo or your SearXNG instance.
-The key is stored in Home Assistant's `.storage` in plain text, as with other integration
-settings; a local model avoids the model provider, but not the search query.
+For the product photo, Home Assistant fetches the merchant page and uploads the image to
+Telegram. The key is stored in Home Assistant's `.storage` in plain text, as with other
+integration settings; a local model avoids the model provider, but not the search query.
 
 **Price drops push on their own** once a chat is known: when a watched product falls by at
 least the threshold, the bot sends the new price, the old one and the link. The threshold
@@ -317,8 +322,8 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
   that calls `best_deal` directly is not wired up yet.
 - **A merged external-offer view** — `/ask` searches the web for every provider and
   cites sources, but `/deal` does not merge external offers into the catalog table.
-  Fetching the result pages for JSON-LD prices/images, photos (3c) and persistent chat
-  memory (3d) are in [docs/phase3.md](docs/phase3.md).
+  Fetching result pages for JSON-LD prices, and persistent chat memory (3d), are in
+  [docs/phase3.md](docs/phase3.md).
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

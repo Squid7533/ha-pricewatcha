@@ -7,12 +7,14 @@ task creation, Store), so it is driven here with minimal fakes instead of a full
 from __future__ import annotations
 
 import asyncio
+import os
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.pricewatcha import telegram as telegram_module
 from custom_components.pricewatcha.ai import AIResult
+from custom_components.pricewatcha.media import ProductMedia
 from custom_components.pricewatcha.telegram import TelegramFrontend
 
 DEALS = {
@@ -90,15 +92,24 @@ class FakeEntry:
         self.domain = "telegram_bot"
 
 
+class FakeConfig:
+    def path(self, *parts):
+        return os.path.join("/tmp/ha-pricewatcha-test", *parts)
+
+
 class FakeHass:
     def __init__(self) -> None:
         self.bus = FakeBus()
         self.services = FakeServices()
         self.config_entries = FakeConfigEntries()
+        self.config = FakeConfig()
         self.data: dict = {}
 
     def async_create_task(self, coro):
         return asyncio.create_task(coro)
+
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
 
 
 class FakeStore:
@@ -200,10 +211,12 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def make_frontend(hass=None, min_drop=2.0, advisor=None):
+async def make_frontend(hass=None, min_drop=2.0, advisor=None, photos=False):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
-    frontend = TelegramFrontend(hass, coordinator, min_drop, advisor=advisor)
+    frontend = TelegramFrontend(
+        hass, coordinator, min_drop, advisor=advisor, photos=photos
+    )
     await frontend.async_start()
     return hass, coordinator, frontend
 
@@ -659,5 +672,63 @@ def test_ask_uses_web_search_when_the_advisor_offers_it():
 
         assert advisor.web_calls[-1] is True
         assert advisor.web_calls[0] is False
+
+    run(scenario())
+
+
+def test_deal_sends_the_product_photo(monkeypatch):
+    async def fake_media(page_url):
+        assert page_url == "https://example.com/a"
+        return ProductMedia(
+            image=b"fake-jpeg-bytes",
+            content_type="image/jpeg",
+            condition="very good",
+            title="iPhone",
+        )
+
+    monkeypatch.setattr(telegram_module, "fetch_product_media", fake_media)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(photos=True)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        assert len(hass.services.calls) == 2
+        domain, service, data = hass.services.calls[1]
+        assert (domain, service) == ("telegram_bot", "send_photo")
+        assert data["chat_id"] == [1]
+        assert data["file"].endswith(".jpg")
+        assert "931 €" in data["caption"]
+        assert "very good" in data["caption"]
+
+    run(scenario())
+
+
+def test_photo_is_skipped_when_disabled(monkeypatch):
+    async def fake_media(page_url):
+        raise AssertionError("should not fetch a photo when disabled")
+
+    monkeypatch.setattr(telegram_module, "fetch_product_media", fake_media)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(photos=False)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        assert len(hass.services.calls) == 1
+
+    run(scenario())
+
+
+def test_photo_is_skipped_when_the_page_has_no_image(monkeypatch):
+    async def fake_media(page_url):
+        return ProductMedia(condition=None)
+
+    monkeypatch.setattr(telegram_module, "fetch_product_media", fake_media)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(photos=True)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        assert len(hass.services.calls) == 1
 
     run(scenario())

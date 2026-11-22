@@ -10,6 +10,9 @@ and never looks up a chat id: the first chat to speak to the bot is remembered.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
+import time
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, HomeAssistant, callback
@@ -17,9 +20,11 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
+from .media import ProductMedia, fetch_product_media
 from .const import DOMAIN, EVENT_PRICE_CHANGED
 from .format import (
     format_ai_section,
+    format_photo_caption,
     format_ai_unavailable,
     format_alerts,
     format_deals,
@@ -95,21 +100,24 @@ class TelegramFrontend:
         min_drop_pct: float,
         advisor: AIAdvisor | None = None,
         language: str | None = None,
+        photos: bool = False,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
         self._min_drop_pct = min_drop_pct
         self._advisor = advisor
+        self._photos = photos
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
+        self._media_cache: dict[str, tuple[float, ProductMedia | None]] = {}
         self._last_deals: dict[int, dict[str, Any]] = {}
         self._last_assessments: dict[int, str] = {}
         self._chat_ids: list[int] = []
         self._store: Store[dict[str, Any]] | None = None
         self._unsubscribers: list[Any] = []
         self._warned_missing_service = False
-        self._chat_param: str | None = None
+        self._chat_params: dict[str, str] = {}
 
     # --- lifecycle -------------------------------------------------------------
 
@@ -155,28 +163,30 @@ class TelegramFrontend:
     def _service_available(self) -> bool:
         return self.hass.services.has_service(TELEGRAM_DOMAIN, TELEGRAM_SEND_MESSAGE)
 
-    def _chat_param_name(self) -> str:
+    def _chat_param_name(self, service_name: str = TELEGRAM_SEND_MESSAGE) -> str:
         """Which field this Home Assistant calls the destination chat.
 
         `target` is deprecated and stops working in 2026.9.0 in favour of `chat_id`, so
         the supported field is read from the registered service schema instead of
         guessing from the version.
         """
-        if self._chat_param is not None:
-            return self._chat_param
+        if service_name in self._chat_params:
+            return self._chat_params[service_name]
 
         services = self.hass.services.async_services()
-        service = services.get(TELEGRAM_DOMAIN, {}).get(TELEGRAM_SEND_MESSAGE)
+        telegram = services.get(TELEGRAM_DOMAIN, {})
+        service = telegram.get(service_name) or telegram.get(TELEGRAM_SEND_MESSAGE)
         validators = getattr(getattr(service, "schema", None), "schema", None)
         keys = {
             getattr(key, "schema", key)
             for key in validators
         } if isinstance(validators, dict) else set()
 
-        self._chat_param = "chat_id" if "chat_id" in keys else "target"
-        if self._chat_param == "target":
+        param = "chat_id" if "chat_id" in keys else "target"
+        if param == "target":
             _LOGGER.debug("Telegram bot service still expects 'target'; using it")
-        return self._chat_param
+        self._chat_params[service_name] = param
+        return param
 
     async def _async_call(self, chat_id: int, message: str, parse_mode: str) -> None:
         await self.hass.services.async_call(
@@ -210,6 +220,67 @@ class TelegramFrontend:
                 await self._async_call(chat_id, truncate(to_plain(text)), "plain_text")
             except Exception as plain_err:  # noqa: BLE001
                 _LOGGER.warning("Telegram send failed: %s", plain_err)
+
+    async def _async_media(self, page_url: str) -> ProductMedia | None:
+        cached = self._media_cache.get(page_url)
+        ttl = 6 * 3600 if cached is not None and cached[1] is not None else 600
+        if cached is not None and time.monotonic() - cached[0] < ttl:
+            return cached[1]
+        try:
+            media = await fetch_product_media(page_url)
+        except Exception:  # noqa: BLE001 - a blocked shop only costs the photo
+            _LOGGER.debug("Product media failed for %s", page_url, exc_info=True)
+            media = None
+        self._media_cache[page_url] = (time.monotonic(), media)
+        return media
+
+    async def _async_send_photo(self, chat_id: int, payload: dict[str, Any]) -> None:
+        """Send the top deal's product photo, if the shop exposes one."""
+        if not self._photos or not payload.get("deals"):
+            return
+        if not self.hass.services.has_service(TELEGRAM_DOMAIN, "send_photo"):
+            return
+        deal = payload["deals"][0]
+        page_url = deal.get("url")
+        if not page_url:
+            return
+
+        media = await self._async_media(page_url)
+        if media is None:
+            return
+
+        # The page can state a condition the catalog does not carry; keep it for
+        # the caption and for a later /ask about the same deal, even if the image
+        # itself could not be downloaded.
+        if deal.get("condition") is None and media.condition:
+            deal["condition"] = media.condition
+        if not media.image:
+            return
+
+        caption = format_photo_caption(deal, self._language, media.condition)
+        directory = self.hass.config.path("pricewatcha_tmp")
+        path = await self.hass.async_add_executor_job(
+            _write_temp_file, media.image, media.suffix, directory
+        )
+        try:
+            await self.hass.services.async_call(
+                TELEGRAM_DOMAIN,
+                "send_photo",
+                {
+                    self._chat_param_name("send_photo"): [int(chat_id)],
+                    "file": path,
+                    "caption": caption,
+                    "parse_mode": "html",
+                },
+                blocking=True,
+            )
+        except Exception as err:  # noqa: BLE001 - text already delivered
+            _LOGGER.debug("Telegram photo send failed: %s", err)
+        finally:
+            try:
+                await self.hass.async_add_executor_job(os.unlink, path)
+            except OSError:
+                pass
 
     async def _async_register_commands(self) -> None:
         """Make the commands visible in Telegram's "/" menu."""
@@ -384,6 +455,7 @@ class TelegramFrontend:
         if not payload.get("deals"):
             return
         self._last_deals[chat_id] = payload
+        await self._async_send_photo(chat_id, payload)
 
         if ai_active:
             try:
@@ -504,3 +576,12 @@ class TelegramFrontend:
             chat_id,
             format_alerts({"count": len(alerts), "alerts": alerts}, self._language),
         )
+
+
+def _write_temp_file(data: bytes, suffix: str, directory: str) -> str:
+    """Write image bytes inside the HA config dir, which send_photo may read."""
+    os.makedirs(directory, exist_ok=True)
+    handle, path = tempfile.mkstemp(suffix=suffix, dir=directory)
+    with os.fdopen(handle, "wb") as file:
+        file.write(data)
+    return path

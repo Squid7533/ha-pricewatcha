@@ -141,6 +141,7 @@ _CONDITIONS: dict[str, dict[str, str]] = {
     "grade C": {"en": "grade C", "de": "Zustand C"},
     "refurbished": {"en": "refurbished", "de": "generalüberholt"},
     "used": {"en": "used", "de": "gebraucht"},
+    "damaged": {"en": "damaged", "de": "beschädigt"},
 }
 
 
@@ -689,3 +690,20 @@ def format_ai_unavailable(reason: str, language: str = "de") -> str:
     label = _t(language, "ai_unavailable")
     text = _AI_REASONS["de" if german else "en"].get(reason, reason)
     return f"<b>{label}</b>\n{_esc(text)}"
+
+
+def format_photo_caption(
+    deal: dict[str, Any],
+    language: str = "en",
+    page_condition: str | None = None,
+) -> str:
+    """Short caption under the product photo: price, shop, condition, name."""
+    currency = deal.get("currency")
+    title = f"{_money(deal.get('price'), currency, language)} · {_esc(deal.get('shop') or '?')}"
+    condition = deal.get("condition") or page_condition
+    if condition:
+        title += f" · {_esc(_condition(condition, language))}"
+    lines = [f"<b>{title}</b>"]
+    if deal.get("name"):
+        lines.append(_esc(deal["name"]))
+    return truncate("\n".join(lines), 900)

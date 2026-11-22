@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from custom_components.pricewatcha.format import (
     format_ai_section,
+    format_photo_caption,
     format_ai_unavailable,
     format_alerts,
     format_deals,
@@ -379,3 +380,16 @@ def test_ai_section_lists_sources():
     assert "<b>Quellen</b>" in text
     assert '<a href="https://example.com/a">GIGA</a>' in text
     assert '<a href="https://example.com/b">mydealz</a>' in text
+
+
+def test_photo_caption_has_price_shop_condition_and_name():
+    text = format_photo_caption(DEALS["deals"][0], "de")
+    assert "<b>669 € · Asgoodasnew · sehr gut</b>" in text
+    assert "Apple iPhone Air 256GB wolkenweiß" in text
+
+
+def test_photo_caption_uses_the_page_condition_as_fallback():
+    deal = dict(DEALS["deals"][0])
+    deal["condition"] = None
+    text = format_photo_caption(deal, "en", page_condition="refurbished")
+    assert "refurbished" in text

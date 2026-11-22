@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 109 tests pass.
+breaks the deterministic reply; 119 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -121,15 +121,26 @@ same interface if a user wants more reliability and is willing to bring a key.
   later refinement.
 - External offers are **not** merged into `/deal`; that remains a separate decision.
 
-## 3c — photos and condition
+## 3c — photos and condition (done in 0.4.4)
 
-Fetch the merchant page (JSON-LD/Open Graph) for the top offer, cache the image, and
-send it with the Telegram Bot API's `sendPhoto`. HA's `telegram_bot.send_message`
-service cannot send photos, so this needs a small direct Bot API call using the bot
-token the Telegram entry already stores. Fallback: link preview only.
+The catalog has no image field, so the top deal's merchant page is fetched once: JSON-LD
+`Product` first, Open Graph/Twitter image as fallback, `itemCondition` when the catalog
+did not state one. The image is downloaded with `curl_cffi`, written to
+`config/pricewatcha_tmp` (the only place `telegram_bot.send_photo` may read from), sent
+with the caption "price · shop · condition" and the product name, then deleted.
 
-Open decisions: whether fetching every merchant page is acceptable, and how to handle
-shops that block bots.
+- Only the **top deal** is fetched, not every merchant page; results are cached for six
+  hours and failures for ten minutes.
+- A blocked shop or a missing image only costs the photo; the text reply is unaffected.
+- `send_photo` is called through Home Assistant's Telegram service, so no direct Bot API
+  token handling is needed.
+- The toggle lives under **Configure → General → Send a product photo with /deal**.
+- The page condition is used only when the catalog has none; it never overrides a stated
+  catalog condition.
+
+**Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
+arrives after the table; disabling the toggle sends text only; a missing image or a
+blocked shop sends no photo and no error; 119 tests pass.
 
 ## 3d — conversation memory
 
