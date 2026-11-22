@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+from custom_components.pricewatcha.websearch import SearchResult
+
 from custom_components.pricewatcha.ai import (
     AIAdvisor,
     AIClient,
@@ -102,6 +104,8 @@ class FakeClient:
     ) -> AIResult:
         self.calls += 1
         self.web_search = web_search
+        self.user = user
+        self.system = system
         return AIResult(
             text=self.text,
             model="fake-model",
@@ -470,3 +474,116 @@ def test_a_rejected_web_tool_falls_back_to_a_catalog_only_answer():
     assert result is not None
     assert result.text == "Antwort ohne Web."
     assert client.attempts == 2
+
+
+class FakeSearcher:
+    def __init__(self, results):
+        self.results = results
+        self.calls: list[str] = []
+
+    async def __call__(self, query: str):
+        self.calls.append(query)
+        return self.results
+
+
+def test_external_search_feeds_results_and_citations_for_any_provider():
+    searcher = FakeSearcher(
+        [
+            SearchResult(
+                title="GIGA: 799 Euro",
+                url="https://example.com/giga",
+                snippet="MediaMarkt 799 Euro",
+            )
+        ]
+    )
+    client = FakeClient("Bei MediaMarkt 799 €, die Quellen zeigen es.")
+    advisor = AIAdvisor(
+        None,
+        config(
+            base_url="http://localhost:11434/v1",
+            model="llama3.1",
+            web_search_provider="duckduckgo",
+        ),
+        client=client,
+        usage=FakeUsage(),
+        searcher=searcher,
+    )
+
+    result = asyncio.run(
+        advisor.async_advise(PAYLOAD, "Black Friday?", None, web=True)
+    )
+
+    assert result is not None
+    assert client.web_search is False, "external results are passed in, no native tool"
+    assert "https://example.com/giga" in client.user
+    assert result.citations == [
+        {"url": "https://example.com/giga", "title": "GIGA: 799 Euro"}
+    ]
+    assert searcher.calls == ["iphone air wolkenweiß Black Friday?"]
+
+
+def test_external_search_results_are_cached():
+    searcher = FakeSearcher([SearchResult("A", "https://example.com/a")])
+    advisor = AIAdvisor(
+        None,
+        config(
+            base_url="http://localhost:11434/v1",
+            model="llama3.1",
+            web_search_provider="duckduckgo",
+        ),
+        client=FakeClient("Antwort."),
+        usage=FakeUsage(),
+        searcher=searcher,
+    )
+
+    asyncio.run(advisor.async_advise(PAYLOAD, "Black Friday?", None, web=True))
+    asyncio.run(advisor.async_advise(PAYLOAD, "Black Friday?", None, web=True))
+
+    assert searcher.calls == ["iphone air wolkenweiß Black Friday?"]
+
+
+def test_external_search_failure_falls_back_to_the_catalog_answer():
+    searcher = FakeSearcher([])
+    client = FakeClient("Antwort ohne Web.")
+    advisor = AIAdvisor(
+        None,
+        config(
+            base_url="http://localhost:11434/v1",
+            model="llama3.1",
+            web_search_provider="duckduckgo",
+        ),
+        client=client,
+        usage=FakeUsage(),
+        searcher=searcher,
+    )
+
+    result = asyncio.run(
+        advisor.async_advise(PAYLOAD, "Black Friday?", None, web=True)
+    )
+
+    assert result is not None
+    assert result.citations == []
+    assert "Web search results" not in client.user
+
+
+def test_a_simple_price_question_does_not_search():
+    searcher = FakeSearcher([SearchResult("A", "https://example.com/a")])
+    advisor = AIAdvisor(
+        None,
+        config(
+            base_url="http://localhost:11434/v1",
+            model="llama3.1",
+            web_search_provider="duckduckgo",
+        ),
+        client=FakeClient("Antwort aus den Daten."),
+        usage=FakeUsage(),
+        searcher=searcher,
+    )
+
+    result = asyncio.run(
+        advisor.async_advise(PAYLOAD, "Ist 669 ein guter Preis?", None, web=True)
+    )
+
+    assert result is not None
+    assert searcher.calls == []
+    assert result.citations == []

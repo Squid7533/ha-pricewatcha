@@ -17,6 +17,8 @@ import asyncio
 import json
 import logging
 import re
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +29,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .websearch import SearchResult, build_query, search_web
 from .const import (
     AI_PROVIDER_ANTHROPIC,
     AI_PROVIDER_OPENAI,
@@ -46,6 +49,7 @@ from .const import (
     CONF_AI_TEMPERATURE,
     CONF_AI_TIMEOUT,
     CONF_AI_WEB_SEARCH,
+    CONF_SEARXNG_URL,
     DEFAULT_AI_BASE_URL,
     DEFAULT_AI_DAILY_BUDGET,
     DEFAULT_AI_ENABLED,
@@ -60,6 +64,7 @@ from .const import (
     DEFAULT_AI_TIMEOUT,
     DEFAULT_AI_WEB_SEARCH,
     language_of,
+    resolved_search_provider,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +73,37 @@ ANTHROPIC_VERSION = "2023-06-01"
 MAX_AI_TEXT = 1200
 # Only numbers at or above this look like a price worth validating. Small numbers
 # are usually counts, percentages or "30 € more", which the prompt allows.
+# Questions that benefit from current web data. A simple "is 669 good?" does not
+# need a search; it is answered from the history. The native DeepSeek tool decides
+# for itself, this list only gates the external search.
+_WEB_QUESTION_HINTS = (
+    "black",
+    "friday",
+    "cyber",
+    "sale",
+    "deal",
+    "angebot",
+    "aktion",
+    "rabatt",
+    "gutschein",
+    "günstiger",
+    "guenstiger",
+    "billiger",
+    "sinken",
+    "fallen",
+    "warten",
+    "wann",
+    "zukunft",
+    "später",
+    "spaeter",
+    "media markt",
+    "mediamarkt",
+    "saturn",
+    "amazon",
+    "idealo",
+    "vergleich",
+    "wo gibt",
+)
 _PRICE_FLOOR = 40.0
 _PRICE_TOLERANCE = 1.5
 _PRICE_RE = re.compile(
@@ -111,6 +147,8 @@ class AIConfig:
     daily_budget_usd: float = DEFAULT_AI_DAILY_BUDGET
     monthly_budget_usd: float = DEFAULT_AI_MONTHLY_BUDGET
     web_search: bool = DEFAULT_AI_WEB_SEARCH
+    web_search_provider: str = "duckduckgo"
+    searxng_url: str = ""
 
     @classmethod
     def from_options(cls, options: dict[str, Any] | None) -> AIConfig:
@@ -141,6 +179,8 @@ class AIConfig:
                 options.get(CONF_AI_MONTHLY_BUDGET), DEFAULT_AI_MONTHLY_BUDGET
             ),
             web_search=bool(options.get(CONF_AI_WEB_SEARCH, DEFAULT_AI_WEB_SEARCH)),
+            web_search_provider=resolved_search_provider(options),
+            searxng_url=str(options.get(CONF_SEARXNG_URL) or "").strip(),
         )
 
     @property
@@ -516,6 +556,45 @@ _ASK_WEB_PROMPTS = {
     ),
 }
 
+_ASK_RESULTS_PROMPTS = {
+    "de": (
+        "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Der Nutzer hat "
+        "zuletzt die unten stehenden Angebote gesehen und stellt jetzt eine Frage.\n"
+        "Dir liegen aktuelle Websuchergebnisse als JSON vor. Nutze sie für aktuelle "
+        "Angebote, Aktionen und Nachrichten, wenn sie die Frage beantworten. Beantworte "
+        "die Frage in drei bis fünf Sätzen (höchstens 150 Wörter).\n"
+        "Trenne klar zwischen Katalogdaten (unten) und Web-Funden. Nenne externe Preise "
+        "nur, wenn sie in den Websuchergebnissen stehen, und nenne die Quelle "
+        "(Seitenname). Die Quellen werden automatisch unter deiner Antwort angezeigt. "
+        "Erfinde keine Quellen, Preise oder Angebote; wenn die Ergebnisse die Frage "
+        "nicht beantworten, sage das.\n"
+        "Wenn es um künftige Aktionen geht (z. B. Black Friday), gib eine begründete "
+        "Einschätzung mit Unsicherheit, gestützt auf den Preisverlauf und die "
+        "Web-Funde.\n"
+        "Regeln: keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis; "
+        "antworte auf Deutsch."
+    ),
+    "en": (
+        "You are a level-headed price adviser in a Telegram bot. The user has just "
+        "seen the offers below and now asks a question.\n"
+        "You receive current web search results as JSON. Use them for current offers, "
+        "sales and news when they answer the question. Answer in three to five "
+        "sentences (at most 150 words).\n"
+        "Separate catalog data (below) from web findings. Mention an external price "
+        "only when it appears in the search results, and name the source (site name). "
+        "The sources are shown automatically below your answer. Invent no sources, "
+        "prices or offers; if the results do not answer the question, say so.\n"
+        "For future sales (e.g. Black Friday), give a reasoned estimate with "
+        "uncertainty, based on the price history and the search results.\n"
+        "Rules: no tables, no markdown, no bullet points, no emojis; answer in English."
+    ),
+}
+
+def _wants_web(question: str) -> bool:
+    lowered = question.lower()
+    return any(hint in lowered for hint in _WEB_QUESTION_HINTS)
+
+
 def _numbers(value: Any, out: set[float]) -> None:
     if isinstance(value, bool):
         return
@@ -609,12 +688,16 @@ class AIAdvisor:
         *,
         client: AIClient | None = None,
         usage: AIUsage | None = None,
+        searcher: Callable[[str], Awaitable[list[SearchResult]]] | None = None,
     ) -> None:
         self.config = config
         self.language = config.language_code
         self.last_error: str | None = None
+        self._hass = hass
         self._client = client or AIClient(async_get_clientsession(hass), config)
         self._usage = usage or AIUsage(hass, config)
+        self._searcher = searcher
+        self._search_cache: dict[str, tuple[float, list[SearchResult]]] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -623,7 +706,11 @@ class AIAdvisor:
 
     @property
     def web_available(self) -> bool:
-        return self.config.web_search and self.config.supports_web_search
+        if not self.config.web_search:
+            return False
+        if self.config.supports_web_search:
+            return True
+        return self.config.web_search_provider != "none"
 
     async def async_advise(
         self,
@@ -644,15 +731,32 @@ class AIAdvisor:
             self.last_error = "not_configured"
             return None
 
-        use_web = bool(web and self.config.supports_web_search)
+        use_native = bool(web and self.config.supports_web_search)
+        use_external = bool(
+            web
+            and not use_native
+            and self.web_available
+            and question is not None
+            and _wants_web(question)
+        )
+        web_results: list[SearchResult] = []
+        if use_external and question is not None:
+            web_results = await self._async_search(payload, question)
+            if not web_results:
+                use_external = False
+
         strict = question is None
         if question is None:
             system = _ASSESSMENT_PROMPTS[self.language]
-        elif use_web:
+        elif use_native:
             system = _ASK_WEB_PROMPTS[self.language]
+        elif use_external:
+            system = _ASK_RESULTS_PROMPTS[self.language]
         else:
             system = _ASK_PROMPTS[self.language]
-        user = self._user_prompt(payload, question, previous, use_web)
+        user = self._user_prompt(
+            payload, question, previous, web_tool=use_native, web_results=web_results
+        )
         estimate = estimate_cost(self.config, system, user)
 
         async with self._lock:
@@ -667,15 +771,15 @@ class AIAdvisor:
             try:
                 try:
                     result = await self._client.async_complete(
-                        system, user, web_search=use_web
+                        system, user, web_search=use_native
                     )
                 except AIResponseError as err:
                     # A provider may reject the server-side tool (wrong model,
                     # gateway, API change). Better a catalog-only answer than none.
-                    if not use_web:
+                    if not use_native:
                         raise
                     _LOGGER.warning("Web search rejected (%s); retrying without it", err)
-                    use_web = False
+                    use_native = False
                     system = _ASK_PROMPTS[self.language]
                     user = self._user_prompt(payload, question, previous, False)
                     result = await self._client.async_complete(
@@ -708,6 +812,8 @@ class AIAdvisor:
                     return None
 
             result.text = text
+            if web_results:
+                result.citations = [item.to_citation() for item in web_results[:4]]
             result.spent_today = await self._usage.async_record(result.cost_usd)
             _LOGGER.debug(
                 "AI answer from %s: %s tokens in, %s out, $%.6f",
@@ -724,6 +830,9 @@ class AIAdvisor:
         question: str | None,
         previous: str | None = None,
         web: bool = False,
+        *,
+        web_tool: bool = False,
+        web_results: list[SearchResult] | None = None,
     ) -> str:
         compact = _compact_payload(payload)
         data = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
@@ -734,8 +843,20 @@ class AIAdvisor:
                 if question
                 else "\n\nSchreibe die Einschätzung."
             )
-            if web:
+            if web or web_tool:
                 tail += "\n\nNutze die Websuche für aktuelle Angebote und Aktionen."
+            if web_results:
+                results = json.dumps(
+                    [item.to_dict() for item in web_results],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                tail += (
+                    "\n\nWebsuche-Ergebnisse (JSON):\n"
+                    f"{results}\n"
+                    "Nutze nur diese URLs als Quellen; die Quellen werden automatisch "
+                    "angezeigt."
+                )
             if previous:
                 tail += (
                     "\n\nDeine bisherige Einschätzung (bleibe konsistent, korrigiere "
@@ -747,14 +868,56 @@ class AIAdvisor:
             if question
             else "\n\nWrite the assessment."
         )
-        if web:
+        if web or web_tool:
             tail += "\n\nUse the web search for current offers and sales."
+        if web_results:
+            results = json.dumps(
+                [item.to_dict() for item in web_results],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            tail += (
+                "\n\nWeb search results (JSON):\n"
+                f"{results}\n"
+                "Use only these URLs as sources; the sources are shown automatically."
+            )
         if previous:
             tail += (
                 "\n\nYour previous assessment (stay consistent, correct it only "
                 f"with a good reason): {previous}"
             )
         return f"Today is {today}.\nData from the Pricewatcha catalog:\n{data}{tail}"
+
+    async def _async_search(
+        self, payload: dict[str, Any], question: str
+    ) -> list[SearchResult]:
+        query = build_query(payload.get("query"), question)
+        if not query:
+            return []
+        key = f"{self.config.web_search_provider}|{query}"
+        cached = self._search_cache.get(key)
+        if cached is not None and time.monotonic() - cached[0] < 1800:
+            return cached[1]
+
+        try:
+            if self._searcher is not None:
+                results = await self._searcher(query)
+            else:
+                session = async_get_clientsession(self._hass)
+                results = await search_web(
+                    session,
+                    query,
+                    provider=self.config.web_search_provider,
+                    searxng_url=self.config.searxng_url,
+                    language=self.language,
+                )
+        except Exception as err:  # noqa: BLE001 - search is best effort
+            _LOGGER.debug("Web search failed: %s", err)
+            return []
+
+        results = results[:5]
+        self._search_cache[key] = (time.monotonic(), results)
+        return results
 
 
 def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:

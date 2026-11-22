@@ -15,6 +15,8 @@
   "loggers": [
     "custom_components.pricewatcha"
   ],
-  "requirements": [],
-  "version": "0.4.2"
+  "requirements": [
+    "curl_cffi>=0.15.0"
+  ],
+  "version": "0.4.3"
 }

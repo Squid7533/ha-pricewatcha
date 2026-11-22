@@ -39,9 +39,9 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 97 tests pass.
+breaks the deterministic reply; 109 tests pass.
 
-## 3b — provider-neutral web search for `/ask` (next)
+## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
 Goal: **every** configured model — including Ollama, LM Studio, vLLM, OpenRouter and
 Groq — can look up current offers, sales and news for a question and cite what it used.
@@ -50,8 +50,10 @@ Groq — can look up current offers, sales and news for a question and cite what
 ### Decision (2026-11-22)
 
 There is **no SearXNG instance** available for this installation. DuckDuckGo therefore
-becomes the default external search; SearXNG stays an optional base URL for later and
-nothing in the design assumes it exists.
+became the default external search; SearXNG stays an optional base URL and nothing in
+the design assumes it exists. DuckDuckGo's HTML endpoint rejects plain `aiohttp` with a
+202 challenge, so the fetch uses `curl_cffi` (browser TLS impersonation, the same tool
+`price_watch` uses); it is declared in the manifest and installed by HA.
 
 ### Order of preference
 
@@ -65,16 +67,16 @@ nothing in the design assumes it exists.
 3. **DuckDuckGo HTML** (`https://html.duckduckgo.com/html/?q=…`) as the zero-config
    fallback: free, no key, no setup. Brittle (markup changes, occasional rate limits),
    which is why SearXNG remains an option.
-4. **No search**: answer from the price history and general market knowledge, exactly as
-   non-DeepSeek providers do today. A failed search must never turn into an error.
+4. **No search**: answer from the price history and general market knowledge when the
+   search fails or the user turned it off. A failed search must never become an error.
 
 ### Data flow
 
 1. Build a query from the product/query plus the question, dropping filler words and
    capping the length (e.g. `iPhone Air wolkenweiß Black Friday Angebote 2026`).
-2. Fetch the top ~5 results: title, URL, snippet. Optionally fetch the top 1–2 pages for
-   JSON-LD/meta price and image (the `price_watch` pattern); snippets are enough for a
-   first version.
+2. Fetch the top ~5 results: title, URL, snippet. 0.4.3 deliberately stops at snippets;
+   fetching the top pages for JSON-LD price/image (the `price_watch` pattern) is a later
+   refinement.
 3. Hand the results to the model as compact JSON. The system prompt:
    - may only cite URLs from that JSON — no invented links or shops;
    - separates catalog data (below) from web findings;
@@ -95,7 +97,7 @@ nothing in the design assumes it exists.
 No key is needed for DuckDuckGo or SearXNG. Brave/Tavily can be added later behind the
 same interface if a user wants more reliability and is willing to bring a key.
 
-### Acceptance
+### Acceptance (met in 0.4.3)
 
 - Ollama + DuckDuckGo answers a Black Friday question with current offers and sources.
 - DuckDuckGo/SearXNG unreachable → catalog-only answer, no user-facing error and no
@@ -103,6 +105,9 @@ same interface if a user wants more reliability and is willing to bring a key.
 - `/deal` output is unchanged; external prices still cannot enter its assessment.
 - Only URLs returned by the search provider appear as sources.
 - Tests mock the search HTTP; CI never calls DuckDuckGo or a real SearXNG.
+- The DuckDuckGo path was verified live on 2026-11-22: idealo, MediaMarkt, billiger.de
+  and CHIP came back for "iPhone Air wolkenweiß Black Friday Angebote 2026"; sponsored
+  `/y.js` redirects are filtered out.
 
 ### Risks and open questions
 

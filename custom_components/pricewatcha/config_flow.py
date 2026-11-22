@@ -29,8 +29,10 @@ from .const import (
     CONF_AI_WEB_SEARCH,
     CONF_API_KEY,
     CONF_LANGUAGE,
+    CONF_SEARXNG_URL,
     CONF_SCAN_INTERVAL,
     CONF_TELEGRAM_MIN_DROP,
+    CONF_WEB_SEARCH_PROVIDER,
     DEFAULT_AI_BASE_URL,
     DEFAULT_AI_DAILY_BUDGET,
     DEFAULT_AI_ENABLED,
@@ -45,6 +47,7 @@ from .const import (
     DEFAULT_AI_WEB_SEARCH,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
+    DEFAULT_WEB_SEARCH_PROVIDER,
     DOMAIN,
     language_of,
     MAX_SCAN_INTERVAL,
@@ -215,6 +218,14 @@ class PricewatchaOptionsFlow(OptionsFlow):
                     errors[CONF_AI_BASE_URL] = "invalid_url"
                 if not str(cleaned.get(CONF_AI_MODEL) or "").strip():
                     errors[CONF_AI_MODEL] = "invalid_model"
+                searxng = str(cleaned.get(CONF_SEARXNG_URL) or "").strip()
+                if searxng and not searxng.startswith(("http://", "https://")):
+                    errors[CONF_SEARXNG_URL] = "invalid_url"
+                if (
+                    cleaned.get(CONF_WEB_SEARCH_PROVIDER) == "searxng"
+                    and not searxng
+                ):
+                    errors[CONF_SEARXNG_URL] = "searxng_url_required"
             if not errors:
                 return self.async_create_entry(
                     title="", data={**options, **cleaned}
@@ -234,6 +245,25 @@ class PricewatchaOptionsFlow(OptionsFlow):
                             CONF_AI_WEB_SEARCH, DEFAULT_AI_WEB_SEARCH
                         ),
                     ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_WEB_SEARCH_PROVIDER,
+                        default=current.get(
+                            CONF_WEB_SEARCH_PROVIDER, DEFAULT_WEB_SEARCH_PROVIDER
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"value": "auto", "label": "Auto (SearXNG if set, else DuckDuckGo)"},
+                                {"value": "duckduckgo", "label": "DuckDuckGo"},
+                                {"value": "searxng", "label": "SearXNG"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_SEARXNG_URL,
+                        default=current.get(CONF_SEARXNG_URL, ""),
+                    ): selector.TextSelector(),
                     vol.Optional(
                         CONF_AI_PROVIDER,
                         default=current.get(CONF_AI_PROVIDER, DEFAULT_AI_PROVIDER),

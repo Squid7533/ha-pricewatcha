@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.4.2"
+VERSION: Final = "0.4.3"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -107,6 +107,8 @@ CONF_AI_INPUT_COST = "ai_input_cost_per_mtok"
 CONF_AI_OUTPUT_COST = "ai_output_cost_per_mtok"
 CONF_AI_DAILY_BUDGET = "ai_daily_budget_usd"
 CONF_AI_WEB_SEARCH = "ai_web_search"
+CONF_WEB_SEARCH_PROVIDER = "web_search_provider"
+CONF_SEARXNG_URL = "searxng_url"
 CONF_AI_MONTHLY_BUDGET = "ai_monthly_budget_usd"
 
 AI_PROVIDER_OPENAI = "openai_compatible"
@@ -131,6 +133,7 @@ DEFAULT_AI_INPUT_COST: Final = 0.30
 DEFAULT_AI_OUTPUT_COST: Final = 1.20
 DEFAULT_AI_DAILY_BUDGET: Final = 1.0
 DEFAULT_AI_WEB_SEARCH: Final = True
+DEFAULT_WEB_SEARCH_PROVIDER: Final = "auto"
 DEFAULT_AI_MONTHLY_BUDGET: Final = 10.0
 
 AI_USAGE_STORAGE_VERSION: Final = 1
@@ -146,3 +149,22 @@ def language_of(options: dict[str, object] | None) -> str:
         or DEFAULT_LANGUAGE
     ).lower()
     return value if value in ("de", "en") else DEFAULT_LANGUAGE
+
+
+def resolved_search_provider(options: dict[str, object] | None) -> str:
+    """Which external search backend should run for this installation.
+
+    Native provider tools (DeepSeek) are handled separately; this only decides the
+    fallback used by models that have no web tool of their own.
+    """
+    options = options or {}
+    provider = str(
+        options.get(CONF_WEB_SEARCH_PROVIDER) or DEFAULT_WEB_SEARCH_PROVIDER
+    ).lower()
+    if provider not in ("auto", "duckduckgo", "searxng"):
+        provider = DEFAULT_WEB_SEARCH_PROVIDER
+    if provider == "searxng" and not options.get(CONF_SEARXNG_URL):
+        return "none"
+    if provider == "auto":
+        return "searxng" if options.get(CONF_SEARXNG_URL) else "duckduckgo"
+    return provider
