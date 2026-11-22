@@ -36,9 +36,18 @@ class FakeServices:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict]] = []
         self.available = True
+        self.chat_fields = {"chat_id"}
 
     def has_service(self, domain: str, service: str) -> bool:
         return self.available
+
+    def async_services(self):
+        markers = {field: None for field in self.chat_fields}
+        return {
+            "telegram_bot": {
+                "send_message": SimpleNamespace(schema=SimpleNamespace(schema=markers))
+            }
+        }
 
     async def async_call(self, domain, service, data, blocking=False):
         self.calls.append((domain, service, data))
@@ -176,7 +185,7 @@ def test_deal_command_answers_in_telegram():
         assert len(hass.services.calls) == 1
         domain, service, data = hass.services.calls[0]
         assert (domain, service) == ("telegram_bot", "send_message")
-        assert data["target"] == [42]
+        assert data["chat_id"] == [42]
         assert 'Best deals for "iphone 17 pro"' in data["message"]
 
     run(scenario())
@@ -248,7 +257,7 @@ def test_first_chat_is_remembered_second_is_refused():
         await asyncio.sleep(0.05)
 
         last = hass.services.calls[-1][2]
-        assert last["target"] == [200]
+        assert last["chat_id"] == [200]
         assert "already connected" in last["message"]
         assert frontend.chat_ids == [100]
 
@@ -444,3 +453,31 @@ def test_no_telegram_entry_means_no_issue(monkeypatch):
     run(scenario())
 
     assert created == []
+
+
+def test_uses_chat_id_when_the_service_supports_it():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire("telegram_command", {"chat_id": 5, "command": "/help", "args": []})
+        await asyncio.sleep(0.05)
+        payload = hass.services.calls[0][2]
+        assert payload["chat_id"] == [5]
+        assert "target" not in payload
+
+    run(scenario())
+
+
+def test_falls_back_to_target_on_older_home_assistant():
+    async def scenario():
+        hass = FakeHass()
+        hass.services.chat_fields = {"target"}
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        hass.bus.fire("telegram_command", {"chat_id": 5, "command": "/help", "args": []})
+        await asyncio.sleep(0.05)
+
+        payload = hass.services.calls[0][2]
+        assert payload["target"] == [5]
+        assert "chat_id" not in payload
+
+    run(scenario())

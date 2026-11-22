@@ -14,6 +14,9 @@
 #      teaches the package your chat id, which the price-drop notification uses.
 #
 # Commands: /deal /search /track /watch /alerts /help
+#
+# Uses `chat_id`, which replaces the deprecated `target` field (removed in HA 2026.9).
+# On Home Assistant before that, use `target:` instead.
 # Free text without a slash is treated like /deal.
 
 input_text:
@@ -66,7 +69,7 @@ automation:
         response_variable: deals
       - action: telegram_bot.send_message
         data:
-          target: "{{ trigger.event.data.chat_id }}"
+          chat_id: "{{ trigger.event.data.chat_id }}"
           message: |-
             {%- set ns = namespace(lines=[]) -%}
             {%- for item in deals.deals -%}
@@ -98,7 +101,7 @@ automation:
             sequence:
               - action: telegram_bot.send_message
                 data:
-                  target: "{{ trigger.event.data.chat_id }}"
+                  chat_id: "{{ trigger.event.data.chat_id }}"
                   message: "Usage: /deal iphone 18 pro"
         default:
           - action: pricewatcha.best_deal
@@ -108,7 +111,7 @@ automation:
             response_variable: deals
           - action: telegram_bot.send_message
             data:
-              target: "{{ trigger.event.data.chat_id }}"
+              chat_id: "{{ trigger.event.data.chat_id }}"
               message: |-
                 {%- set ns = namespace(lines=[]) -%}
                 {%- for item in deals.deals -%}
@@ -140,7 +143,7 @@ automation:
         response_variable: found
       - action: telegram_bot.send_message
         data:
-          target: "{{ trigger.event.data.chat_id }}"
+          chat_id: "{{ trigger.event.data.chat_id }}"
           message: |-
             {%- set ns = namespace(lines=[]) -%}
             {%- for item in found.results -%}
@@ -170,7 +173,7 @@ automation:
             sequence:
               - action: telegram_bot.send_message
                 data:
-                  target: "{{ trigger.event.data.chat_id }}"
+                  chat_id: "{{ trigger.event.data.chat_id }}"
                   message: "Usage: /track https://shop.example/product"
         default:
           - action: pricewatcha.track
@@ -180,7 +183,7 @@ automation:
             response_variable: tracked
           - action: telegram_bot.send_message
             data:
-              target: "{{ trigger.event.data.chat_id }}"
+              chat_id: "{{ trigger.event.data.chat_id }}"
               message: |-
                 {%- set lines = ['Tracking submitted: ' ~ (tracked.status | default('unknown'))] -%}
                 {%- if tracked.product -%}
@@ -204,7 +207,7 @@ automation:
           product_id: "{{ trigger.event.data.args | default([]) | first | default('') }}"
       - action: telegram_bot.send_message
         data:
-          target: "{{ trigger.event.data.chat_id }}"
+          chat_id: "{{ trigger.event.data.chat_id }}"
           message: "Now watching {{ trigger.event.data.args | default([]) | first }}. Its sensor appears on the next poll."
 
   - id: pricewatcha_telegram_alerts
@@ -220,7 +223,7 @@ automation:
         response_variable: alerts
       - action: telegram_bot.send_message
         data:
-          target: "{{ trigger.event.data.chat_id }}"
+          chat_id: "{{ trigger.event.data.chat_id }}"
           message: |-
             {%- set ns = namespace(lines=[]) -%}
             {%- for item in alerts.alerts -%}
@@ -251,7 +254,7 @@ automation:
     actions:
       - action: telegram_bot.send_message
         data:
-          target: "{{ trigger.event.data.chat_id }}"
+          chat_id: "{{ trigger.event.data.chat_id }}"
           message: |-
             Pricewatcha commands:
 
@@ -281,7 +284,7 @@ automation:
     actions:
       - action: telegram_bot.send_message
         data:
-          target: "{{ states('input_text.pricewatcha_chat_id') }}"
+          chat_id: "{{ states('input_text.pricewatcha_chat_id') }}"
           message: |-
             Price drop: {{ trigger.event.data.name }}
             {{ trigger.event.data.new_price }} {{ trigger.event.data.currency }}

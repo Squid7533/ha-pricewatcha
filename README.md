@@ -194,6 +194,11 @@ the Telegram app. Typing the commands works regardless.
 **Every reply arrives twice.** Both the built-in front-end and `examples/telegram.yaml` are
 active — remove the package and restart.
 
+**A repair says `target` is deprecated for `telegram_bot.send_message`.** The integration
+already picks `chat_id` or `target` from the service schema at runtime, so it keeps working
+before and after HA 2026.9. If you also installed `examples/telegram.yaml`, that file now
+uses `chat_id` too; older Home Assistants need `target` there instead.
+
 **Updates stop after a Home Assistant restart.** Check the integration is still loaded and
 that the allowed chat survived; a re-added bot creates a new entry with no chats.
 

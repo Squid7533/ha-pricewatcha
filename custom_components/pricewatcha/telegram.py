@@ -83,6 +83,7 @@ class TelegramFrontend:
         self._store: Store[dict[str, Any]] | None = None
         self._unsubscribers: list[Any] = []
         self._warned_missing_service = False
+        self._chat_param: str | None = None
 
     # --- lifecycle -------------------------------------------------------------
 
@@ -128,6 +129,29 @@ class TelegramFrontend:
     def _service_available(self) -> bool:
         return self.hass.services.has_service(TELEGRAM_DOMAIN, TELEGRAM_SEND_MESSAGE)
 
+    def _chat_param_name(self) -> str:
+        """Which field this Home Assistant calls the destination chat.
+
+        `target` is deprecated and stops working in 2026.9.0 in favour of `chat_id`, so
+        the supported field is read from the registered service schema instead of
+        guessing from the version.
+        """
+        if self._chat_param is not None:
+            return self._chat_param
+
+        services = self.hass.services.async_services()
+        service = services.get(TELEGRAM_DOMAIN, {}).get(TELEGRAM_SEND_MESSAGE)
+        validators = getattr(getattr(service, "schema", None), "schema", None)
+        keys = {
+            getattr(key, "schema", key)
+            for key in validators
+        } if isinstance(validators, dict) else set()
+
+        self._chat_param = "chat_id" if "chat_id" in keys else "target"
+        if self._chat_param == "target":
+            _LOGGER.debug("Telegram bot service still expects 'target'; using it")
+        return self._chat_param
+
     async def _async_send(self, chat_id: int, text: str) -> None:
         if not self._service_available():
             if not self._warned_missing_service:
@@ -141,7 +165,7 @@ class TelegramFrontend:
             await self.hass.services.async_call(
                 TELEGRAM_DOMAIN,
                 TELEGRAM_SEND_MESSAGE,
-                {"target": [int(chat_id)], "message": truncate(text)},
+                {self._chat_param_name(): [int(chat_id)], "message": truncate(text)},
                 blocking=True,
             )
         except Exception as err:  # noqa: BLE001 - a failed reply must not kill the listener
