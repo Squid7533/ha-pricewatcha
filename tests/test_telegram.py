@@ -148,18 +148,23 @@ class FakeClient:
 class FakeAdvisor:
     """Duck-typed stand-in for AIAdvisor."""
 
-    def __init__(self, text="669 € ist ein guter Preis.", available=True, error=None):
+    def __init__(
+        self, text="669 € ist ein guter Preis.", available=True, error=None, web_available=False
+    ):
         self.available = available
+        self.web_available = web_available
         self.language = "de"
         self.text = text
         self.error = error
         self.last_error = None
         self.calls: list[tuple[dict, str | None]] = []
         self.previous: list[str | None] = []
+        self.web_calls: list[bool] = []
 
-    async def async_advise(self, payload, question=None, previous=None):
+    async def async_advise(self, payload, question=None, previous=None, *, web=False):
         self.calls.append((payload, question))
         self.previous.append(previous)
+        self.web_calls.append(web)
         if self.error:
             self.last_error = self.error
             return None
@@ -638,5 +643,21 @@ def test_a_failed_assessment_falls_back_to_the_deterministic_verdict():
         assert len(hass.services.calls) == 2
         assert "Fazit" not in hass.services.calls[0][2]["message"]
         assert "<b>Fazit:</b>" in hass.services.calls[1][2]["message"]
+
+    run(scenario())
+
+
+def test_ask_uses_web_search_when_the_advisor_offers_it():
+    advisor = FakeAdvisor(web_available=True)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["black", "friday?"]})
+        await asyncio.sleep(0.05)
+
+        assert advisor.web_calls[-1] is True
+        assert advisor.web_calls[0] is False
 
     run(scenario())

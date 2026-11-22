@@ -363,3 +363,19 @@ def test_verdict_can_be_sent_on_its_own():
     text = format_verdict(DEALS, "en")
     assert text.startswith("<b>Verdict:</b> 669 €")
     assert "New costs 220 € more" in text
+
+
+def test_ai_section_lists_sources():
+    result = SimpleNamespace(
+        text="Bei MediaMarkt gab es 799 €.",
+        model="deepseek-flash",
+        spent_today=0.002,
+        citations=[
+            {"url": "https://example.com/a", "title": "GIGA"},
+            {"url": "https://example.com/b", "title": "mydealz"},
+        ],
+    )
+    text = format_ai_section(result, "de", answer=True)
+    assert "<b>Quellen</b>" in text
+    assert '<a href="https://example.com/a">GIGA</a>' in text
+    assert '<a href="https://example.com/b">mydealz</a>' in text

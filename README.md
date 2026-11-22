@@ -23,7 +23,8 @@ the account features (watchlist, price alerts) need a free
   your phone, plus price-drop pushes, with no YAML and no chat id to look up.
 - **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
-  plus `/ask` follow-ups. Off by default; the deterministic answer never depends on it.
+  plus `/ask` follow-ups. With DeepSeek, `/ask` can search the web for current offers
+  and cite its sources. Off by default; the deterministic answer never depends on it.
 - **Config flow** — paste the key once in the UI; reauth is supported when you rotate it.
 
 ## Install
@@ -223,6 +224,7 @@ assistant**:
 | Base URL | DeepSeek `https://api.deepseek.com`, OpenAI `https://api.openai.com/v1`, Anthropic `https://api.anthropic.com`, Ollama `http://192.168.1.10:11434/v1` |
 | Model | Free text. DeepSeek preset is `deepseek-flash`; Ollama e.g. `llama3.1` |
 | API key | Your own key; leave empty for a local server |
+| Web search for `/ask` | DeepSeek only: current offers, sales and news with cited sources; `/deal` stays catalog-only |
 | Language | Set under **General**; applies to the table and the AI text |
 | Budgets | USD per day and per month, checked before every call; `0` means no limit |
 
@@ -235,10 +237,17 @@ For a self-hosted model, remember that `localhost` inside the Home Assistant con
 is not your workstation: use the host's LAN address, or the add-on's internal URL when
 Ollama runs as a Home Assistant add-on. Local servers usually need no key.
 
+`/ask` is where future questions belong: the model sees the dated price history and may
+give a reasoned estimate about Black Friday or a next price step, clearly labelled as an
+estimate. With DeepSeek's web search enabled it can also look up current offers and
+news; the sources are appended below the answer as links. `/deal`'s assessment is
+stricter and only uses catalog prices, so the table stays a fact sheet.
+
 Privacy: only the product name, prices, shops, conditions and your `/ask` question are
-sent to the provider you chose — no Home Assistant states, entities or location. The
-key is stored in Home Assistant's `.storage` in plain text, as with other integration
-settings; a local model avoids that.
+sent to the provider you chose — no Home Assistant states, entities or location. With
+web search on, the question and the search results go to DeepSeek. The key is stored in
+Home Assistant's `.storage` in plain text, as with other integration settings; a local
+model avoids that.
 
 **Price drops push on their own** once a chat is known: when a watched product falls by at
 least the threshold, the bot sends the new price, the old one and the link. The threshold
@@ -301,9 +310,10 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
 
 - **Assist intents** — the AI advisor is Telegram-only for now; a conversation agent
   that calls `best_deal` directly is not wired up yet.
-- **Offers outside the Pricewatcha catalog** (Saturn, MediaMarkt, idealo) — planned as
-  3b, together with photos (3c) and persistent chat memory (3d). See
-  [docs/phase3.md](docs/phase3.md).
+- **A merged external-offer view** — `/ask` can already search the web with DeepSeek and
+  cite sources, but `/deal` does not merge external offers into the catalog table, and
+  providers without a native web tool have no search yet. That, photos (3c) and
+  persistent chat memory (3d) are in [docs/phase3.md](docs/phase3.md).
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

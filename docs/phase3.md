@@ -28,7 +28,9 @@ optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
   the table omits the deterministic verdict so there is one judgment, not two. If the
   model fails, the deterministic verdict follows as a short message.
 - `/ask <question>` answers about the last `/deal` in that chat and receives the
-  previous assessment so the two answers stay consistent.
+  previous assessment so the two answers stay consistent. It may reason about future
+  sales from the dated history, and with DeepSeek it can use the server-side web search
+  with citations.
 - Grounding: compact JSON of the deal payload; a price the model invents (≥ 40 €, not a
   known value or a difference of two known values) rejects the whole answer.
 - Budget: worst-case estimate checked before the call, actual cost recorded afterwards
@@ -37,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 89 tests pass.
+breaks the deterministic reply; 97 tests pass.
 
 ## 3b — offers outside the catalog (next, after review)
 
@@ -79,6 +81,7 @@ follow-up (more magic) or stay a search.
 | --- | --- | --- |
 | 3a | 0.4.0 | AI advisor, provider config, `/ask`, budgets |
 | 3a.1 | 0.4.1 | one verdict (AI replaces the deterministic one), full-language replies |
-| 3b | 0.4.2 | web offers outside the catalog |
-| 3c | 0.4.3 | product photos / condition |
-| 3d | 0.4.4 | persistent conversation memory |
+| 3a.2 | 0.4.2 | `/ask` may reason about future sales; DeepSeek web search with sources |
+| 3b | 0.4.3 | web offers for providers without native search (DDG/SearXNG) |
+| 3c | 0.4.4 | product photos / condition |
+| 3d | 0.4.5 | persistent conversation memory |

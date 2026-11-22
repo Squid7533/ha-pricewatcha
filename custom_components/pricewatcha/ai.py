@@ -17,7 +17,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     AI_PROVIDER_ANTHROPIC,
+    AI_PROVIDER_OPENAI,
     AI_PROVIDERS,
     AI_USAGE_STORAGE_KEY,
     AI_USAGE_STORAGE_VERSION,
@@ -44,6 +45,7 @@ from .const import (
     CONF_AI_PROVIDER,
     CONF_AI_TEMPERATURE,
     CONF_AI_TIMEOUT,
+    CONF_AI_WEB_SEARCH,
     DEFAULT_AI_BASE_URL,
     DEFAULT_AI_DAILY_BUDGET,
     DEFAULT_AI_ENABLED,
@@ -56,6 +58,7 @@ from .const import (
     DEFAULT_AI_PROVIDER,
     DEFAULT_AI_TEMPERATURE,
     DEFAULT_AI_TIMEOUT,
+    DEFAULT_AI_WEB_SEARCH,
     language_of,
 )
 
@@ -107,6 +110,7 @@ class AIConfig:
     output_cost_per_mtok: float = DEFAULT_AI_OUTPUT_COST
     daily_budget_usd: float = DEFAULT_AI_DAILY_BUDGET
     monthly_budget_usd: float = DEFAULT_AI_MONTHLY_BUDGET
+    web_search: bool = DEFAULT_AI_WEB_SEARCH
 
     @classmethod
     def from_options(cls, options: dict[str, Any] | None) -> AIConfig:
@@ -136,6 +140,7 @@ class AIConfig:
             monthly_budget_usd=_as_float(
                 options.get(CONF_AI_MONTHLY_BUDGET), DEFAULT_AI_MONTHLY_BUDGET
             ),
+            web_search=bool(options.get(CONF_AI_WEB_SEARCH, DEFAULT_AI_WEB_SEARCH)),
         )
 
     @property
@@ -146,6 +151,11 @@ class AIConfig:
     @property
     def language_code(self) -> str:
         return self.language if self.language in ("de", "en") else "de"
+
+    @property
+    def supports_web_search(self) -> bool:
+        """DeepSeek's server-side web tools; other providers have no equivalent here."""
+        return self.provider == AI_PROVIDER_OPENAI and "deepseek" in self.base_url.lower()
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -172,6 +182,7 @@ class AIResult:
     output_tokens: int = 0
     cost_usd: float = 0.0
     spent_today: float = 0.0
+    citations: list[dict[str, str]] = field(default_factory=list)
 
 
 def endpoint_for(config: AIConfig) -> str:
@@ -191,7 +202,9 @@ class AIClient:
         self._session = session
         self._config = config
 
-    async def async_complete(self, system: str, user: str) -> AIResult:
+    async def async_complete(
+        self, system: str, user: str, *, web_search: bool = False
+    ) -> AIResult:
         config = self._config
         if config.provider == AI_PROVIDER_ANTHROPIC:
             payload = {
@@ -230,6 +243,10 @@ class AIClient:
                 or config.model.lower().startswith("deepseek")
             ):
                 payload["thinking"] = {"type": "disabled"}
+            if web_search and config.provider == AI_PROVIDER_OPENAI:
+                # Server-side tools: the model searches, the client only receives
+                # the answer plus citations. Search itself is not billed separately.
+                payload["tools"] = [{"type": "deepseek_web_search"}]
             headers = {"content-type": "application/json"}
             if config.api_key:
                 headers["authorization"] = f"Bearer {config.api_key}"
@@ -287,12 +304,28 @@ def _parse_openai(data: dict[str, Any]) -> AIResult:
     if not text.strip():
         raise AIResponseError("the provider returned an empty message")
 
+    message = data["choices"][0].get("message") or {}
+    citations: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for annotation in message.get("annotations") or []:
+        if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
+            continue
+        citation = annotation.get("url_citation") or {}
+        url = str(citation.get("url") or "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        citations.append(
+            {"url": url, "title": str(citation.get("title") or url)}
+        )
+
     usage = data.get("usage") or {}
     return AIResult(
         text=text,
         model=str(data.get("model") or ""),
         input_tokens=_as_int(usage.get("prompt_tokens"), 0),
         output_tokens=_as_int(usage.get("completion_tokens"), 0),
+        citations=citations[:5],
     )
 
 
@@ -388,7 +421,7 @@ def estimate_cost(config: AIConfig, system: str, user: str) -> float:
     ) / 1_000_000
 
 
-_SYSTEM_PROMPTS = {
+_ASSESSMENT_PROMPTS = {
     "de": (
         "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Der Bot zeigt "
         "bereits eine Tabelle mit allen Preisen; deine Einschätzung ist das Fazit.\n"
@@ -400,8 +433,7 @@ _SYSTEM_PROMPTS = {
         "- Nutze nur Preise, Shops, Zustände und Zahlen aus den Daten. Erfinde nichts.\n"
         "- Wiederhole nicht die Preistabelle; nenne höchstens zwei Beträge.\n"
         "- Keine Spekulation über künftige Aktionen (z. B. Black Friday) oder Shops, "
-        "die nicht in den Daten stehen. Wenn die Daten eine Frage nicht beantworten, "
-        "sage das klar.\n"
+        "die nicht in den Daten stehen.\n"
         "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
         "- Antworte auf Deutsch."
     ),
@@ -416,12 +448,73 @@ _SYSTEM_PROMPTS = {
         "- Use only prices, shops, conditions and numbers from the data. Invent nothing.\n"
         "- Do not repeat the price table; mention at most two amounts.\n"
         "- Do not speculate about future sales (e.g. Black Friday) or shops that are "
-        "not in the data. If the data cannot answer a question, say so clearly.\n"
+        "not in the data.\n"
         "- No tables, no markdown, no bullet points, no emojis.\n"
         "- Answer in English."
     ),
 }
 
+_ASK_PROMPTS = {
+    "de": (
+        "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Der Nutzer hat "
+        "zuletzt die unten stehenden Angebote gesehen und stellt jetzt eine Frage.\n"
+        "Beantworte die Frage in zwei bis vier Sätzen (höchstens 120 Wörter). Wenn es "
+        "um künftige Aktionen geht (z. B. Black Friday), darfst du eine begründete "
+        "Einschätzung geben: stütze dich auf den Preisverlauf, den Abstand zu "
+        "Neupreisen und allgemeines Marktwissen. Kennzeichne sie klar als Einschätzung, "
+        "nicht als Tatsache.\n"
+        "Regeln:\n"
+        "- Katalogpreise nur aus den Daten; erfinde keine.\n"
+        "- Nenne keine konkreten Fremdangebote, Händlerpreise oder Quellen, die nicht "
+        "in den Daten stehen. Wenn du sie nicht hast, sage das.\n"
+        "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
+        "- Antworte auf Deutsch."
+    ),
+    "en": (
+        "You are a level-headed price adviser in a Telegram bot. The user has just "
+        "seen the offers below and now asks a question.\n"
+        "Answer in two to four sentences (at most 120 words). If the question is about "
+        "future sales (e.g. Black Friday), you may give a reasoned estimate: base it on "
+        "the price history, the gap to new prices and general market knowledge. Label "
+        "it clearly as an estimate, not a fact.\n"
+        "Rules:\n"
+        "- Catalog prices only from the data; invent none.\n"
+        "- Do not name specific third-party offers, retailer prices or sources that "
+        "are not in the data. If you do not have them, say so.\n"
+        "- No tables, no markdown, no bullet points, no emojis.\n"
+        "- Answer in English."
+    ),
+}
+
+_ASK_WEB_PROMPTS = {
+    "de": (
+        "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Der Nutzer hat "
+        "zuletzt die unten stehenden Angebote gesehen und stellt jetzt eine Frage.\n"
+        "Du hast Zugriff auf eine Websuche. Nutze sie für aktuelle Angebote, Aktionen "
+        "und Nachrichten, wenn die Frage davon profitiert. Beantworte die Frage in drei "
+        "bis fünf Sätzen (höchstens 150 Wörter).\n"
+        "Trenne klar zwischen Katalogdaten (unten) und Web-Funden. Nenne externe Preise "
+        "nur mit Quelle; die Quellen werden automatisch unter deiner Antwort angezeigt. "
+        "Erfinde keine Quellen und keine Preise. Wenn es um künftige Aktionen geht "
+        "(z. B. Black Friday), gib eine begründete Einschätzung mit Unsicherheit, "
+        "gestützt auf den Preisverlauf und die Web-Funde.\n"
+        "Regeln: keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis; "
+        "antworte auf Deutsch."
+    ),
+    "en": (
+        "You are a level-headed price adviser in a Telegram bot. The user has just "
+        "seen the offers below and now asks a question.\n"
+        "You can search the web. Use it for current offers, sales and news when the "
+        "question benefits from it. Answer in three to five sentences (at most 150 "
+        "words).\n"
+        "Separate catalog data (below) from web findings. Mention an external price "
+        "only with a source; the sources are shown automatically below your answer. "
+        "Invent no sources and no prices. For future sales (e.g. Black Friday), give a "
+        "reasoned estimate with uncertainty, based on the price history and the web "
+        "findings.\n"
+        "Rules: no tables, no markdown, no bullet points, no emojis; answer in English."
+    ),
+}
 
 def _numbers(value: Any, out: set[float]) -> None:
     if isinstance(value, bool):
@@ -528,20 +621,38 @@ class AIAdvisor:
     def available(self) -> bool:
         return self.config.configured
 
+    @property
+    def web_available(self) -> bool:
+        return self.config.web_search and self.config.supports_web_search
+
     async def async_advise(
         self,
         payload: dict[str, Any],
         question: str | None = None,
         previous: str | None = None,
+        *,
+        web: bool = False,
     ) -> AIResult | None:
-        """Return a grounded assessment, or ``None`` with ``last_error`` set."""
+        """Return a grounded assessment, or ``None`` with ``last_error`` set.
+
+        The assessment under ``/deal`` is strict: every price must come from the
+        payload. A question may reason about future sales, and with DeepSeek it may
+        use the web; then external prices are allowed (the prompt demands sources).
+        """
         self.last_error = None
         if not self.available:
             self.last_error = "not_configured"
             return None
 
-        system = _SYSTEM_PROMPTS[self.language]
-        user = self._user_prompt(payload, question, previous)
+        use_web = bool(web and self.config.supports_web_search)
+        strict = question is None
+        if question is None:
+            system = _ASSESSMENT_PROMPTS[self.language]
+        elif use_web:
+            system = _ASK_WEB_PROMPTS[self.language]
+        else:
+            system = _ASK_PROMPTS[self.language]
+        user = self._user_prompt(payload, question, previous, use_web)
         estimate = estimate_cost(self.config, system, user)
 
         async with self._lock:
@@ -554,7 +665,22 @@ class AIAdvisor:
                 return None
 
             try:
-                result = await self._client.async_complete(system, user)
+                try:
+                    result = await self._client.async_complete(
+                        system, user, web_search=use_web
+                    )
+                except AIResponseError as err:
+                    # A provider may reject the server-side tool (wrong model,
+                    # gateway, API change). Better a catalog-only answer than none.
+                    if not use_web:
+                        raise
+                    _LOGGER.warning("Web search rejected (%s); retrying without it", err)
+                    use_web = False
+                    system = _ASK_PROMPTS[self.language]
+                    user = self._user_prompt(payload, question, previous, False)
+                    result = await self._client.async_complete(
+                        system, user, web_search=False
+                    )
             except AIAuthError as err:
                 self.last_error = "auth"
                 _LOGGER.warning("AI authentication failed: %s", err)
@@ -572,13 +698,14 @@ class AIAdvisor:
             if not text:
                 self.last_error = "empty"
                 return None
-            invented = unknown_price(text, payload)
-            if invented is not None:
-                self.last_error = "unknown_price"
-                _LOGGER.warning(
-                    "AI answer rejected: price %s is not in the deal data", invented
-                )
-                return None
+            if strict:
+                invented = unknown_price(text, payload)
+                if invented is not None:
+                    self.last_error = "unknown_price"
+                    _LOGGER.warning(
+                        "AI answer rejected: price %s is not in the deal data", invented
+                    )
+                    return None
 
             result.text = text
             result.spent_today = await self._usage.async_record(result.cost_usd)
@@ -596,32 +723,38 @@ class AIAdvisor:
         payload: dict[str, Any],
         question: str | None,
         previous: str | None = None,
+        web: bool = False,
     ) -> str:
         compact = _compact_payload(payload)
         data = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        today = dt_util.now().strftime("%d.%m.%Y")
         if self.language == "de":
             tail = (
                 f"\n\nFrage des Nutzers: {question}\nAntworte direkt auf die Frage."
                 if question
                 else "\n\nSchreibe die Einschätzung."
             )
+            if web:
+                tail += "\n\nNutze die Websuche für aktuelle Angebote und Aktionen."
             if previous:
                 tail += (
                     "\n\nDeine bisherige Einschätzung (bleibe konsistent, korrigiere "
                     f"sie nur mit gutem Grund): {previous}"
                 )
-            return f"Daten aus dem Pricewatcha-Katalog:\n{data}{tail}"
+            return f"Heute ist der {today}.\nDaten aus dem Pricewatcha-Katalog:\n{data}{tail}"
         tail = (
             f"\n\nUser question: {question}\nAnswer the question directly."
             if question
             else "\n\nWrite the assessment."
         )
+        if web:
+            tail += "\n\nUse the web search for current offers and sales."
         if previous:
             tail += (
                 "\n\nYour previous assessment (stay consistent, correct it only "
                 f"with a good reason): {previous}"
             )
-        return f"Data from the Pricewatcha catalog:\n{data}{tail}"
+        return f"Today is {today}.\nData from the Pricewatcha catalog:\n{data}{tail}"
 
 
 def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -630,23 +763,28 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     for deal in (payload.get("deals") or [])[:3]:
         if not isinstance(deal, dict):
             continue
-        deals.append(
-            {
-                key: deal.get(key)
-                for key in (
-                    "price",
-                    "currency",
-                    "shop",
-                    "condition",
-                    "capacity",
-                    "vs_average_pct",
-                    "average_price",
-                    "historical_low",
-                    "trend",
-                )
-                if deal.get(key) is not None
-            }
-        )
+        item = {
+            key: deal.get(key)
+            for key in (
+                "price",
+                "currency",
+                "shop",
+                "condition",
+                "capacity",
+                "vs_average_pct",
+                "average_price",
+                "historical_low",
+                "trend",
+            )
+            if deal.get(key) is not None
+        }
+        # The dated history is what lets the model reason about direction and
+        # future sales; only the top deal needs it.
+        if not deals and deal.get("history"):
+            item["history"] = [
+                point for point in deal["history"][-6:] if isinstance(point, dict)
+            ]
+        deals.append(item)
     groups = []
     for group in payload.get("groups") or []:
         if not isinstance(group, dict):

@@ -430,7 +430,9 @@ class TelegramFrontend:
 
         previous = self._last_assessments.get(chat_id)
         try:
-            result = await self._advisor.async_advise(payload, question, previous)
+            result = await self._advisor.async_advise(
+                payload, question, previous, web=self._advisor.web_available
+            )
         except Exception:  # noqa: BLE001 - never leave /ask without an answer
             _LOGGER.debug("AI question failed", exc_info=True)
             result = None

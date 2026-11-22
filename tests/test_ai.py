@@ -95,9 +95,13 @@ class FakeClient:
     def __init__(self, text: str) -> None:
         self.text = text
         self.calls = 0
+        self.web_search = False
 
-    async def async_complete(self, system: str, user: str) -> AIResult:
+    async def async_complete(
+        self, system: str, user: str, *, web_search: bool = False
+    ) -> AIResult:
         self.calls += 1
+        self.web_search = web_search
         return AIResult(
             text=self.text,
             model="fake-model",
@@ -143,6 +147,7 @@ def test_defaults_are_off_and_point_at_deepseek():
     assert cfg.language == "en"
     assert cfg.daily_budget_usd == 1.0
     assert cfg.monthly_budget_usd == 10.0
+    assert cfg.web_search is True
 
 
 def test_options_are_parsed_and_unknown_provider_falls_back():
@@ -309,9 +314,13 @@ def test_question_is_passed_to_the_model():
             super().__init__("Antwort.")
             self.user = ""
 
-        async def async_complete(self, system: str, user: str) -> AIResult:
+        async def async_complete(
+            self, system: str, user: str, *, web_search: bool = False
+        ) -> AIResult:
             self.user = user
-            return await super().async_complete(system, user)
+            return await super().async_complete(
+                system, user, web_search=web_search
+            )
 
     client = RecordingClient()
     asyncio.run(
@@ -355,3 +364,109 @@ def test_a_zero_budget_means_no_limit():
     asyncio.run(usage.async_record(100.0))
     allowed, _ = asyncio.run(usage.async_can_spend(100.0))
     assert allowed is True
+
+
+def test_web_question_allows_external_prices_and_uses_the_tool():
+    client = FakeClient("Bei MediaMarkt gab es das Gerät zuletzt für 799 €.")
+    advisor = AIAdvisor(
+        None, config(web_search=True), client=client, usage=FakeUsage()
+    )
+
+    result = asyncio.run(
+        advisor.async_advise(PAYLOAD, "Könnte es am Black Friday besser werden?", web=True)
+    )
+
+    assert result is not None
+    assert client.web_search is True
+    assert "799" in result.text
+
+
+def test_assessment_still_rejects_external_prices():
+    client = FakeClient("Bei MediaMarkt kostet es 799 €.")
+
+    result = asyncio.run(
+        AIAdvisor(None, config(web_search=True), client=client, usage=FakeUsage()).async_advise(
+            PAYLOAD
+        )
+    )
+
+    assert result is None
+    assert client.web_search is False
+
+
+def test_question_prompt_contains_date_and_history():
+    class RecordingClient(FakeClient):
+        def __init__(self):
+            super().__init__("Antwort.")
+            self.user = ""
+
+        async def async_complete(
+            self, system: str, user: str, *, web_search: bool = False
+        ) -> AIResult:
+            self.user = user
+            return await super().async_complete(system, user, web_search=web_search)
+
+    payload = dict(PAYLOAD)
+    payload["deals"] = [dict(PAYLOAD["deals"][0], history=[{"date": "2026-10-13", "price": 739}])]
+    client = RecordingClient()
+    asyncio.run(
+        AIAdvisor(None, config(), client=client, usage=FakeUsage()).async_advise(
+            payload, "Wird es billiger?", None, web=False
+        )
+    )
+
+    assert "Heute ist der" in client.user
+    assert "2026-10-13" in client.user
+    assert "Black Friday" not in client.user.split("Frage des Nutzers")[0]
+
+
+def test_web_search_request_declares_the_tool_and_parses_citations():
+    body = (
+        '{"model":"deepseek-flash","choices":[{"message":{'
+        '"content":"Bei MediaMarkt 799 €.",'
+        '"annotations":[{"type":"url_citation","url_citation":{'
+        '"url":"https://example.com/deal","title":"Black Friday deal"}}]}}],'
+        '"usage":{"prompt_tokens":900,"completion_tokens":80}}'
+    )
+    session = FakeSession(200, body)
+    client = AIClient(session, config())
+
+    result = asyncio.run(
+        client.async_complete("system", "user", web_search=True)
+    )
+
+    call = session.calls[0]
+    assert call["json"]["tools"] == [{"type": "deepseek_web_search"}]
+    assert result.citations == [
+        {"url": "https://example.com/deal", "title": "Black Friday deal"}
+    ]
+
+
+def test_without_web_search_no_tools_are_declared():
+    session = FakeSession(200, '{"choices":[{"message":{"content":"ok"}}]}')
+    asyncio.run(AIClient(session, config()).async_complete("s", "u"))
+    assert "tools" not in session.calls[0]["json"]
+
+
+def test_a_rejected_web_tool_falls_back_to_a_catalog_only_answer():
+    class WebRejectingClient(FakeClient):
+        def __init__(self):
+            super().__init__("Antwort ohne Web.")
+            self.attempts = 0
+
+        async def async_complete(self, system, user, *, web_search=False):
+            self.attempts += 1
+            if web_search:
+                raise AIResponseError("HTTP 400: tools not supported")
+            return await super().async_complete(system, user, web_search=web_search)
+
+    client = WebRejectingClient()
+    result = asyncio.run(
+        AIAdvisor(None, config(), client=client, usage=FakeUsage()).async_advise(
+            PAYLOAD, "Black Friday?", None, web=True
+        )
+    )
+
+    assert result is not None
+    assert result.text == "Antwort ohne Web."
+    assert client.attempts == 2

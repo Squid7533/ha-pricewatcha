@@ -26,6 +26,7 @@ from .const import (
     CONF_AI_PROVIDER,
     CONF_AI_TEMPERATURE,
     CONF_AI_TIMEOUT,
+    CONF_AI_WEB_SEARCH,
     CONF_API_KEY,
     CONF_LANGUAGE,
     CONF_SCAN_INTERVAL,
@@ -41,6 +42,7 @@ from .const import (
     DEFAULT_AI_PROVIDER,
     DEFAULT_AI_TEMPERATURE,
     DEFAULT_AI_TIMEOUT,
+    DEFAULT_AI_WEB_SEARCH,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
     DOMAIN,
@@ -225,6 +227,12 @@ class PricewatchaOptionsFlow(OptionsFlow):
                     vol.Optional(
                         CONF_AI_ENABLED,
                         default=current.get(CONF_AI_ENABLED, DEFAULT_AI_ENABLED),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_AI_WEB_SEARCH,
+                        default=current.get(
+                            CONF_AI_WEB_SEARCH, DEFAULT_AI_WEB_SEARCH
+                        ),
                     ): selector.BooleanSelector(),
                     vol.Optional(
                         CONF_AI_PROVIDER,

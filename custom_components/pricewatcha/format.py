@@ -633,13 +633,29 @@ def format_ai_section(
     model = getattr(result, "model", "") or "AI"
     spent = float(getattr(result, "spent_today", 0.0) or 0.0)
     spent_text = f"{spent:.4f}".replace(".", ",") if german else f"{spent:.4f}"
-    footer = (
-        f"{model} · {spent_text} $ {_t(language, 'today')}"
-    )
-    return (
-        f"<b>{label}</b>\n{_esc(getattr(result, 'text', ''))}"
-        f"\n\n<i>{_esc(footer)}</i>"
-    )
+    footer = f"{model} · {spent_text} $ {_t(language, 'today')}"
+
+    lines = [
+        f"<b>{label}</b>",
+        _esc(getattr(result, "text", "")),
+    ]
+    citations = [
+        citation
+        for citation in (getattr(result, "citations", None) or [])
+        if isinstance(citation, dict) and str(citation.get("url") or "").startswith("http")
+    ]
+    if citations:
+        lines += ["", f"<b>{'Quellen' if german else 'Sources'}</b>"]
+        seen: set[str] = set()
+        for citation in citations[:4]:
+            url = str(citation["url"])
+            if url in seen:
+                continue
+            seen.add(url)
+            title = str(citation.get("title") or url)
+            lines.append(f'· <a href="{_esc_attr(url)}">{_esc(title)}</a>')
+    lines += ["", f"<i>{_esc(footer)}</i>"]
+    return "\n".join(lines)
 
 
 _AI_REASONS = {
