@@ -1369,3 +1369,92 @@ def test_natural_language_reports_a_provider_without_tools():
         assert "watch" in message
 
     run(scenario())
+
+
+def test_alert_drop_only_clears_the_thresholds():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "drop", "only"]},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (
+                77,
+                {
+                    "notify_on_drop": True,
+                    "notify_on_rise": False,
+                    "min_threshold_price": None,
+                    "max_threshold_price": None,
+                },
+            )
+        ]
+        message = hass.services.calls[-1][2]["message"]
+        assert "on any drop" in message
+        assert "min." not in message
+
+    run(scenario())
+
+
+def test_alert_chained_edit_can_clear_min_explicitly():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "drop", "on", "min", "off"]},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (77, {"notify_on_drop": True, "min_threshold_price": None})
+        ]
+
+    run(scenario())
+
+
+def test_natural_language_drop_only_clears_the_value():
+    advisor = FakeAdvisor()
+    advisor.plan = AIPlan(
+        calls=[
+            AIToolCall(
+                name="update_alert",
+                arguments={
+                    "alert_ref": "current",
+                    "drop": True,
+                    "clear_thresholds": True,
+                },
+            )
+        ]
+    )
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        coordinator.client.alerts_list = [
+            {
+                "alert_id": 1324,
+                "name": "Deal range",
+                "currency": "EUR",
+                "min_threshold_price": 620,
+                "is_active": True,
+            }
+        ]
+        hass.bus.fire(
+            "telegram_text",
+            {"chat_id": 1, "text": "ändere den preisalarm auf preis fallend ohne wert"},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (
+                1324,
+                {
+                    "notify_on_drop": True,
+                    "min_threshold_price": None,
+                    "max_threshold_price": None,
+                },
+            )
+        ]
+
+    run(scenario())

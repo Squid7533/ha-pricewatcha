@@ -696,6 +696,10 @@ ACTION_TOOLS: list[dict[str, Any]] = [
                     "drop": {"type": "boolean"},
                     "rise": {"type": "boolean"},
                     "active": {"type": "boolean"},
+                    "clear_thresholds": {
+                        "type": "boolean",
+                        "description": "Clear min/max and notify on any drop/rise; use for 'ohne Wert' / 'preis fallend'.",
+                    },
                     "name": {"type": "string"},
                 },
                 "required": ["alert_ref"],
@@ -811,7 +815,8 @@ _ACTION_PROMPTS = {
         "call no tool and ask a short clarifying question.\n"
         "Examples: 'watch the MediaMarkt offer' -> watch with the matching offer ref; "
         "'change the price alert to 400 EUR' -> update_alert with min=400 and the "
-        "current alert ref.\n"
+        "current alert ref; 'ohne Wert' or 'preis fallend' means drop=true with "
+        "clear_thresholds=true.\n"
         "Answer in English."
     ),
 }

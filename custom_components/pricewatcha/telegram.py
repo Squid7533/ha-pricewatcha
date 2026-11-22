@@ -595,6 +595,9 @@ class TelegramFrontend:
                     changes[f"notify_on_{key}"] = bool(args[key])
             if args.get("active") is not None:
                 changes["is_active"] = bool(args["active"])
+            if args.get("clear_thresholds"):
+                changes["min_threshold_price"] = None
+                changes["max_threshold_price"] = None
             if args.get("name"):
                 changes["name"] = str(args["name"])
 
@@ -1303,45 +1306,82 @@ class TelegramFrontend:
             return
 
         alert_id = int(args[0])
-        key = str(args[1]).lower()
         changes: dict[str, Any] = {}
-        if key in ("pause", "resume"):
-            changes["is_active"] = key == "resume"
-        elif key in ("active", "enable", "disable"):
-            if len(args) < 3 or args[2].lower() not in ("on", "off", "an", "aus", "true", "false"):
-                await self._async_send(chat_id, usage)
-                return
-            changes["is_active"] = args[2].lower() in ("on", "an", "true")
-        elif key in ("min", "max"):
-            if len(args) < 3:
-                await self._async_send(chat_id, usage)
-                return
-            raw = str(args[2]).lower()
-            if raw in ("off", "clear", "aus", "none", "-"):
-                changes[f"{key}_threshold_price"] = None
-            else:
+        index = 1
+        booleans = ("on", "off", "an", "aus", "true", "false")
+        only_words = ("only", "any", "nur")
+
+        while index < len(args):
+            key = str(args[index]).lower()
+            following = str(args[index + 1]).lower() if index + 1 < len(args) else ""
+            if key in ("pause", "resume"):
+                changes["is_active"] = key == "resume"
+                index += 1
+            elif key in ("active", "enable", "disable"):
+                if following not in booleans:
+                    await self._async_send(chat_id, usage)
+                    return
+                changes["is_active"] = following in ("on", "an", "true")
+                index += 2
+            elif key in ("min", "max"):
+                if not following:
+                    await self._async_send(chat_id, usage)
+                    return
+                if following in ("off", "clear", "aus", "none", "-"):
+                    changes[f"{key}_threshold_price"] = None
+                else:
+                    try:
+                        changes[f"{key}_threshold_price"] = float(
+                            following.replace(",", ".")
+                        )
+                    except ValueError:
+                        await self._async_send(chat_id, usage)
+                        return
+                index += 2
+            elif key in ("drop", "rise"):
+                if following in only_words:
+                    # "drop only": notify on any drop, clear both thresholds and
+                    # switch the other direction off.
+                    changes[f"notify_on_{key}"] = True
+                    other = "rise" if key == "drop" else "drop"
+                    changes[f"notify_on_{other}"] = False
+                    changes["min_threshold_price"] = None
+                    changes["max_threshold_price"] = None
+                    index += 2
+                elif following in booleans:
+                    changes[f"notify_on_{key}"] = following in ("on", "an", "true")
+                    index += 2
+                else:
+                    changes[f"notify_on_{key}"] = True
+                    index += 1
+            elif key in only_words and following in ("drop", "rise"):
+                changes[f"notify_on_{following}"] = True
+                other = "rise" if following == "drop" else "drop"
+                changes[f"notify_on_{other}"] = False
+                changes["min_threshold_price"] = None
+                changes["max_threshold_price"] = None
+                index += 2
+            elif key == "name":
+                name = " ".join(args[index + 1:]).strip()
+                if not name:
+                    await self._async_send(chat_id, usage)
+                    return
+                changes["name"] = name
+                break
+            elif index == 1 and not following:
                 try:
-                    changes[f"{key}_threshold_price"] = float(raw.replace(",", "."))
+                    changes["min_threshold_price"] = float(key.replace(",", "."))
                 except ValueError:
                     await self._async_send(chat_id, usage)
                     return
-        elif key in ("drop", "rise"):
-            if len(args) < 3 or args[2].lower() not in ("on", "off", "an", "aus", "true", "false"):
+                index += 1
+            else:
                 await self._async_send(chat_id, usage)
                 return
-            changes[f"notify_on_{key}"] = args[2].lower() in ("on", "an", "true")
-        elif key == "name":
-            name = " ".join(args[2:]).strip()
-            if not name:
-                await self._async_send(chat_id, usage)
-                return
-            changes["name"] = name
-        else:
-            try:
-                changes["min_threshold_price"] = float(key.replace(",", "."))
-            except ValueError:
-                await self._async_send(chat_id, usage)
-                return
+
+        if not changes:
+            await self._async_send(chat_id, usage)
+            return
 
         try:
             result = await self._coordinator.client.update_alert(alert_id, **changes)

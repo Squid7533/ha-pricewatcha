@@ -182,7 +182,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/history 1` | price history of a result or watched product |
 | `/product 1` | details of a result or watched product |
 | `/alerts` | your price alerts |
-| `/alert 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop on/off`, `rise on/off`, `pause`, `resume`, `name …` |
+| `/alert 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop`/`rise` `on/off`, `drop only` (any drop, no threshold), `pause`, `resume`, `name …`; several fields in one line |
 | `/alert new 1 min 620 name …` | create an alert for the first result |
 | `/alert show 1324` / `/alert delete 1324` | show or delete an alert |
 | `/status` | watchlist size, last poll, AI spend, API reachability |
@@ -192,7 +192,10 @@ the first chat that writes to the bot becomes the owner and is remembered.
 
 `/alert` is the bot-side manager: `/alert new 1 min 620` creates an alert for the
 first result, `/alert 1324 …` changes only the field you name, and `/alert show` /
-`/alert delete` handle the rest. The ids come from `/alerts`.
+`/alert delete` handle the rest. The ids come from `/alerts`. `/alert 1324 drop only`
+turns it into "notify on any drop" and clears min/max; `/alert 1324 drop on min off`
+does the same in two explicit fields. Natural language „ändere den Preisalarm auf
+preis fallend ohne Wert“ maps to that as well.
 
 When `/ask` used the web, its sources are numbered under the answer and stored with the
 conversation. `/track 1` watches the first one without pasting a URL; `/track` without an
