@@ -24,3 +24,26 @@ jobs:
         with:
           category: integration
           ignore: brands
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Home Assistant and pytest
+        run: pip install homeassistant pytest colorlog
+      - name: Unit tests
+        run: python -m pytest tests -q
+      - name: Validate the Telegram example with Home Assistant
+        run: |
+          mkdir -p /tmp/haconf/packages
+          cp examples/telegram.yaml /tmp/haconf/packages/pricewatcha_telegram.yaml
+          printf 'homeassistant:\n  packages: !include_dir_named packages\n' > /tmp/haconf/configuration.yaml
+          hass --script check_config -c /tmp/haconf 2>&1 | tee /tmp/check.log
+          if grep -q '^ERROR' /tmp/check.log; then
+            echo "::error::Home Assistant rejected the example package"
+            exit 1
+          fi

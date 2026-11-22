@@ -108,6 +108,71 @@ data:
 response_variable: deals
 ```
 
+## Events
+
+When a watched product's price moves between polls, the integration fires
+`pricewatcha_price_changed` on the Home Assistant bus, so notifications don't have to
+enumerate entity ids:
+
+| Field | Meaning |
+| --- | --- |
+| `product_id`, `name`, `shop`, `product_url`, `currency` | which product |
+| `old_price`, `new_price` | the change |
+| `change`, `change_pct` | absolute and percentage difference |
+| `is_drop` | `true` when the price fell |
+
+```yaml
+automation:
+  - alias: Notify on any drop over 5 %
+    triggers:
+      - trigger: event
+        event_type: pricewatcha_price_changed
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.event.data.is_drop and trigger.event.data.change_pct | abs > 5 }}"
+    actions:
+      - action: notify.mobile_app_your_phone
+        data:
+          title: "{{ trigger.event.data.name }} dropped"
+          message: >-
+            {{ trigger.event.data.new_price }} {{ trigger.event.data.currency }}
+            (was {{ trigger.event.data.old_price }})
+          data:
+            url: "{{ trigger.event.data.product_url }}"
+```
+
+## Telegram bot
+
+`examples/telegram.yaml` is a drop-in package that turns a Telegram bot into a command
+line for Pricewatcha — the phone-side interface that needs no tunnel, no connector and no
+API key in the chat:
+
+1. Create a bot with **@BotFather** in Telegram and copy the token.
+2. Home Assistant → **Settings → Devices & services → Add integration → Telegram bot**,
+   paste the token (polling).
+3. Copy `examples/telegram.yaml` to `config/packages/` and ensure `configuration.yaml` has:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+4. Restart, then message your bot once — the first message teaches the package your chat
+   id, which also receives price-drop notifications.
+
+| Command | Does |
+| --- | --- |
+| `/deal iphone 18 pro` | best value, ranked against each product's own history |
+| anything without a slash | same as `/deal` |
+| `/search iphone 18 pro` | raw catalog matches with links |
+| `/track <url>` | track a URL and watch it |
+| `/watch <product_id>` | watch a catalog product |
+| `/alerts` | your price alerts |
+| `/help` | the command list |
+
+`input_number.pricewatcha_min_drop_pct` (default 2 %) sets the smallest drop worth a
+notification; `input_text.pricewatcha_chat_id` holds the learned chat.
+
 ## Quotas and behaviour
 
 - One watchlist request per poll interval regardless of how many products you watch.
@@ -120,9 +185,20 @@ response_variable: deals
 
 ## Not (yet) included
 
-- **Assist intents** for LLM tool calling — 0.2.0, so Claude/OpenAI conversation agents can
-  call `best_deal` directly in chat.
+- **Assist intents** — planned for 0.3.0, so a Claude/OpenAI conversation agent can call
+  `best_deal` straight from a chat instead of the `/deal` command.
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
+
+## Development
+
+```bash
+pip install homeassistant pytest
+python -m pytest tests -q
+```
+
+CI runs those tests, `hassfest`, HACS validation, and Home Assistant's own
+`check_config` against `examples/telegram.yaml`.
+
 
 ## License
 

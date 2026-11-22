@@ -7,7 +7,11 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.1.0"
+VERSION: Final = "0.2.0"
+
+# Fired on the bus whenever a watched product's price changes between polls, so
+# notifications (Telegram, mobile push) do not have to enumerate entity ids.
+EVENT_PRICE_CHANGED: Final = "pricewatcha_price_changed"
 
 API_BASE: Final = "https://pricewatcha.com/api/v1"
 API_TIMEOUT: Final = 30

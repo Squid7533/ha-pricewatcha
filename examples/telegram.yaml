@@ -1,0 +1,289 @@
+# Pricewatcha + Telegram bot.
+#
+# Install:
+#   1. Create a bot with @BotFather in Telegram, copy the token.
+#   2. Home Assistant: Settings -> Devices & services -> Add integration -> Telegram bot,
+#      paste the token. (Polling, not webhooks.)
+#   3. Copy this file to config/packages/pricewatcha_telegram.yaml and make sure
+#      configuration.yaml has:
+#
+#        homeassistant:
+#          packages: !include_dir_named packages
+#
+#   4. Restart Home Assistant, then send your bot any message. The first message
+#      teaches the package your chat id, which the price-drop notification uses.
+#
+# Commands: /deal /search /track /watch /alerts /help
+# Free text without a slash is treated like /deal.
+
+input_text:
+  pricewatcha_chat_id:
+    name: Pricewatcha Telegram chat id
+    max: 32
+
+input_number:
+  pricewatcha_min_drop_pct:
+    name: Pricewatcha minimum drop to notify
+    min: 0
+    max: 50
+    step: 0.5
+    initial: 2
+    unit_of_measurement: "%"
+
+automation:
+  - id: pricewatcha_telegram_learn_chat
+    alias: "Pricewatcha: remember Telegram chat"
+    mode: single
+    triggers:
+      - trigger: event
+        event_type: telegram_text
+      - trigger: event
+        event_type: telegram_command
+    actions:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.pricewatcha_chat_id
+        data:
+          value: "{{ trigger.event.data.chat_id }}"
+
+  - id: pricewatcha_telegram_free_text
+    alias: "Pricewatcha: free text is a deal query"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: event
+        event_type: telegram_text
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.event.data.text | trim | length > 2
+             and not (trigger.event.data.text | trim).startswith('/') }}
+    actions:
+      - action: pricewatcha.best_deal
+        data:
+          query: "{{ trigger.event.data.text | trim }}"
+          limit: 3
+        response_variable: deals
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ trigger.event.data.chat_id }}"
+          message: |-
+            {%- set ns = namespace(lines=[]) -%}
+            {%- for item in deals.deals -%}
+            {%- set line = loop.index ~ '. ' ~ item.name ~ ' — ' ~ item.price ~ ' ' ~ (item.currency or '') ~ ' at ' ~ (item.shop or '') -%}
+            {%- set line = line ~ ((' (' ~ item.vs_average_pct ~ '% below its average)') if item.vs_average_pct is not none else '') -%}
+            {%- set ns.lines = ns.lines + [line, item.url or ''] -%}
+            {%- endfor -%}
+            {%- if ns.lines -%}
+            Best deals for "{{ deals.query }}" ({{ deals.compared }} compared):
+            {{ ns.lines | join('\n') }}
+            {%- else -%}
+            Nothing matched "{{ deals.query }}".
+            {%- endif -%}
+
+  - id: pricewatcha_telegram_deal
+    alias: "Pricewatcha: /deal"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /deal
+    actions:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.args | default([]) | length == 0 }}"
+            sequence:
+              - action: telegram_bot.send_message
+                data:
+                  target: "{{ trigger.event.data.chat_id }}"
+                  message: "Usage: /deal iphone 18 pro"
+        default:
+          - action: pricewatcha.best_deal
+            data:
+              query: "{{ trigger.event.data.args | default([]) | join(' ') }}"
+              limit: 3
+            response_variable: deals
+          - action: telegram_bot.send_message
+            data:
+              target: "{{ trigger.event.data.chat_id }}"
+              message: |-
+                {%- set ns = namespace(lines=[]) -%}
+                {%- for item in deals.deals -%}
+                {%- set line = loop.index ~ '. ' ~ item.name ~ ' — ' ~ item.price ~ ' ' ~ (item.currency or '') ~ ' at ' ~ (item.shop or '') -%}
+                {%- set line = line ~ ((' (' ~ item.vs_average_pct ~ '% below its average)') if item.vs_average_pct is not none else '') -%}
+                {%- set ns.lines = ns.lines + [line, item.url or ''] -%}
+                {%- endfor -%}
+                {%- if ns.lines -%}
+                Best deals for "{{ deals.query }}" ({{ deals.compared }} compared):
+                {{ ns.lines | join('\n') }}
+                {%- else -%}
+                Nothing matched "{{ deals.query }}".
+                {%- endif -%}
+
+  - id: pricewatcha_telegram_search
+    alias: "Pricewatcha: /search"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /search
+    actions:
+      - action: pricewatcha.search
+        data:
+          query: "{{ trigger.event.data.args | default([]) | join(' ') }}"
+          limit: 8
+        response_variable: found
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ trigger.event.data.chat_id }}"
+          message: |-
+            {%- set ns = namespace(lines=[]) -%}
+            {%- for item in found.results -%}
+            {%- set ns.lines = ns.lines + [item.name ~ ' — ' ~ item.current_price ~ ' ' ~ (item.currency or '') ~ ' · ' ~ (item.shop or '') ~ '\n' ~ (item.product_url or '')] -%}
+            {%- endfor -%}
+            {%- if ns.lines -%}
+            Search "{{ found.query }}" — {{ found.count }} matches:
+            {{ ns.lines | join('\n\n') }}
+            {%- else -%}
+            Nothing matched "{{ found.query }}".
+            {%- endif -%}
+
+  - id: pricewatcha_telegram_track
+    alias: "Pricewatcha: /track"
+    mode: queued
+    max: 3
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /track
+    actions:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ not (trigger.event.data.args | default([]) | first | default('')).startswith('http') }}"
+            sequence:
+              - action: telegram_bot.send_message
+                data:
+                  target: "{{ trigger.event.data.chat_id }}"
+                  message: "Usage: /track https://shop.example/product"
+        default:
+          - action: pricewatcha.track
+            data:
+              url: "{{ trigger.event.data.args | default([]) | first }}"
+              watch: true
+            response_variable: tracked
+          - action: telegram_bot.send_message
+            data:
+              target: "{{ trigger.event.data.chat_id }}"
+              message: |-
+                {%- set lines = ['Tracking submitted: ' ~ (tracked.status | default('unknown'))] -%}
+                {%- if tracked.product -%}
+                {%- set lines = lines + [tracked.product.name ~ ' — ' ~ tracked.product.current_price ~ ' ' ~ (tracked.product.currency or '')] -%}
+                {%- if tracked.product.product_url -%}{%- set lines = lines + [tracked.product.product_url] -%}{%- endif -%}
+                {%- endif -%}
+                {{ lines | join('\n') }}
+
+  - id: pricewatcha_telegram_watch
+    alias: "Pricewatcha: /watch"
+    mode: queued
+    max: 3
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /watch
+    actions:
+      - action: pricewatcha.watch
+        data:
+          product_id: "{{ trigger.event.data.args | default([]) | first | default('') }}"
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ trigger.event.data.chat_id }}"
+          message: "Now watching {{ trigger.event.data.args | default([]) | first }}. Its sensor appears on the next poll."
+
+  - id: pricewatcha_telegram_alerts
+    alias: "Pricewatcha: /alerts"
+    mode: single
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /alerts
+    actions:
+      - action: pricewatcha.list_alerts
+        response_variable: alerts
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ trigger.event.data.chat_id }}"
+          message: |-
+            {%- set ns = namespace(lines=[]) -%}
+            {%- for item in alerts.alerts -%}
+            {%- set line = '#' ~ item.alert_id ~ ' ' ~ (item.name or item.product_id) ~ ' · drop ' ~ (item.notify_on_drop | string) ~ ' · rise ' ~ (item.notify_on_rise | string) -%}
+            {%- set line = line ~ ((' · min ' ~ item.min_threshold_price) if item.min_threshold_price else '') -%}
+            {%- set line = line ~ ((' · max ' ~ item.max_threshold_price) if item.max_threshold_price else '') -%}
+            {%- set ns.lines = ns.lines + [line] -%}
+            {%- endfor -%}
+            {%- if ns.lines -%}
+            Your price alerts:
+            {{ ns.lines | join('\n') }}
+            {%- else -%}
+            No price alerts set.
+            {%- endif -%}
+
+  - id: pricewatcha_telegram_help
+    alias: "Pricewatcha: /help"
+    mode: single
+    triggers:
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /help
+      - trigger: event
+        event_type: telegram_command
+        event_data:
+          command: /start
+    actions:
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ trigger.event.data.chat_id }}"
+          message: |-
+            Pricewatcha commands:
+
+            /deal iphone 18 pro — best value, ranked against each product's own price history
+            /search iphone 18 pro — raw catalog matches
+            /track <product url> — track a URL and watch it
+            /watch <product_id> — watch a catalog product
+            /alerts — your price alerts
+
+            Or just type what you are looking for.
+
+  - id: pricewatcha_telegram_price_drop
+    alias: "Pricewatcha: price drop to Telegram"
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: event
+        event_type: pricewatcha_price_changed
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.event.data.is_drop
+             and (trigger.event.data.change_pct | float(0) | abs)
+                 >= (states('input_number.pricewatcha_min_drop_pct') | float(2)) }}
+      - condition: template
+        value_template: "{{ states('input_text.pricewatcha_chat_id') | length > 0 }}"
+    actions:
+      - action: telegram_bot.send_message
+        data:
+          target: "{{ states('input_text.pricewatcha_chat_id') }}"
+          message: |-
+            Price drop: {{ trigger.event.data.name }}
+            {{ trigger.event.data.new_price }} {{ trigger.event.data.currency }}
+            (was {{ trigger.event.data.old_price }}, {{ trigger.event.data.change_pct }}%) at {{ trigger.event.data.shop }}
+            {{ trigger.event.data.product_url }}
