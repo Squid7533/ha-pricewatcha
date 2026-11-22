@@ -178,6 +178,25 @@ someone else's Home Assistant." To hand the bot to another chat, delete the
 you would get every reply twice. The built-in front-end is the recommended path; the
 package exists for people who want the logic visible in their automations.
 
+## Troubleshooting
+
+**The bot ignores me, and the log says `Unauthorized update - ... is in allowed chats: []`.**
+Since Home Assistant 2026.2 a Telegram bot drops every message from a chat that is not
+registered, before any event is fired — so Pricewatcha never sees the command. Open
+**Settings → Devices & services → Telegram bot**, choose **Add allowed chat** and enter your
+chat id (message `@userinfobot` in Telegram to get it; the log line names it too). The
+integration raises a repair issue when it finds a bot with no allowed chats.
+
+**Commands don't appear in Telegram's `/` menu.** The integration publishes them to the Bot
+API at startup, but Telegram caches the menu per chat: close and reopen the chat, or restart
+the Telegram app. Typing the commands works regardless.
+
+**Every reply arrives twice.** Both the built-in front-end and `examples/telegram.yaml` are
+active — remove the package and restart.
+
+**Updates stop after a Home Assistant restart.** Check the integration is still loaded and
+that the allowed chat survived; a re-added bot creates a new entry with no chats.
+
 ## Quotas and behaviour
 
 - One watchlist request per poll interval regardless of how many products you watch.

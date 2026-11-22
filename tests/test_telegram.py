@@ -61,10 +61,28 @@ class FakeBus:
             callback(SimpleNamespace(data=data))
 
 
+class FakeConfigEntries:
+    def __init__(self) -> None:
+        self.entries: list = []
+
+    def async_entries(self, domain: str):
+        return [entry for entry in self.entries if getattr(entry, "domain", "telegram_bot") == domain]
+
+
+class FakeEntry:
+    def __init__(self, subentries=None, data=None, title="Bot") -> None:
+        self.subentries = subentries or {}
+        self.data = data or {"api_key": "tok"}
+        self.title = title
+        self.domain = "telegram_bot"
+
+
 class FakeHass:
     def __init__(self) -> None:
         self.bus = FakeBus()
         self.services = FakeServices()
+        self.config_entries = FakeConfigEntries()
+        self.data: dict = {}
 
     def async_create_task(self, coro):
         return asyncio.create_task(coro)
@@ -130,6 +148,8 @@ class FakeCoordinator:
 def patch_store(monkeypatch):
     FakeStore.data = None
     monkeypatch.setattr(telegram_module, "Store", FakeStore)
+    # no real HTTP session exists in these fakes; the Bot API calls are stubbed per test
+    monkeypatch.setattr(telegram_module, "async_get_clientsession", lambda hass: None)
 
 
 def run(coro):
@@ -321,3 +341,106 @@ def test_stop_removes_listeners():
         assert hass.services.calls == []
 
     run(scenario())
+
+
+def test_registers_the_command_menu(monkeypatch):
+    calls = []
+
+    async def fake_set_commands(session, token, commands):
+        calls.append((token, commands))
+
+    monkeypatch.setattr(telegram_module, "set_bot_commands", fake_set_commands)
+    monkeypatch.setattr(telegram_module.ir, "async_create_issue", lambda *a, **k: None)
+    monkeypatch.setattr(telegram_module.ir, "async_delete_issue", lambda *a, **k: None)
+
+    async def scenario():
+        hass = FakeHass()
+        hass.config_entries.entries = [FakeEntry(subentries={"a": object()})]
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        await asyncio.sleep(0.05)
+
+    run(scenario())
+
+    assert len(calls) == 1
+    token, commands = calls[0]
+    assert token == "tok"
+    names = [name for name, _ in commands]
+    assert names == ["deal", "search", "track", "watch", "alerts", "help"]
+
+
+def test_repair_issue_when_no_allowed_chats(monkeypatch):
+    created = []
+    deleted = []
+    monkeypatch.setattr(
+        telegram_module.ir, "async_create_issue", lambda *a, **k: created.append(k)
+    )
+    monkeypatch.setattr(
+        telegram_module.ir, "async_delete_issue", lambda *a, **k: deleted.append(a)
+    )
+
+    async def fake_set_commands(session, token, commands):
+        return None
+
+    monkeypatch.setattr(telegram_module, "set_bot_commands", fake_set_commands)
+
+    async def scenario():
+        hass = FakeHass()
+        hass.config_entries.entries = [FakeEntry(subentries={})]
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        await asyncio.sleep(0.05)
+
+    run(scenario())
+
+    assert len(created) == 1
+    assert created[0]["translation_key"] == "telegram_no_allowed_chat"
+    assert created[0]["is_fixable"] is False
+
+
+def test_repair_issue_cleared_when_a_chat_exists(monkeypatch):
+    created = []
+    deleted = []
+    monkeypatch.setattr(
+        telegram_module.ir, "async_create_issue", lambda *a, **k: created.append(k)
+    )
+    monkeypatch.setattr(
+        telegram_module.ir, "async_delete_issue", lambda *a, **k: deleted.append(a)
+    )
+
+    async def fake_set_commands(session, token, commands):
+        return None
+
+    monkeypatch.setattr(telegram_module, "set_bot_commands", fake_set_commands)
+
+    async def scenario():
+        hass = FakeHass()
+        hass.config_entries.entries = [FakeEntry(subentries={"chat": object()})]
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        await asyncio.sleep(0.05)
+
+    run(scenario())
+
+    assert created == []
+    assert len(deleted) == 1
+
+
+def test_no_telegram_entry_means_no_issue(monkeypatch):
+    created = []
+    monkeypatch.setattr(
+        telegram_module.ir, "async_create_issue", lambda *a, **k: created.append(k)
+    )
+    monkeypatch.setattr(
+        telegram_module.ir, "async_delete_issue", lambda *a, **k: created.append(k)
+    )
+
+    async def scenario():
+        hass = FakeHass()
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        await asyncio.sleep(0.05)
+
+    run(scenario())
+
+    assert created == []

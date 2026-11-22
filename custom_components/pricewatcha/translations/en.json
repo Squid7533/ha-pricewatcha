@@ -37,5 +37,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "telegram_no_allowed_chat": {
+      "title": "Telegram bot ignores Pricewatcha",
+      "description": "Home Assistant's Telegram bot drops every message from chats that are not allowed, so Pricewatcha never sees your commands.\n\nOpen **Settings → Devices & services → Telegram bot**, choose **Add allowed chat** and enter your chat id (message @userinfobot in Telegram to see it), then message the bot again.\n\nThis fixes itself once a chat is added; the repair disappears after the integration reloads."
+    }
   }
 }

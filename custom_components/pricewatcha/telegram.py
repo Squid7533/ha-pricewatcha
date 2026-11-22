@@ -13,6 +13,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, EVENT_PRICE_CHANGED
@@ -39,6 +41,30 @@ EVENT_TELEGRAM_TEXT = "telegram_text"
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.telegram"
+
+ISSUE_NO_ALLOWED_CHAT = "telegram_no_allowed_chat"
+
+# Shown in Telegram's "/" menu once registered with the Bot API.
+BOT_COMMANDS = [
+    ("deal", "Best deal for a product"),
+    ("search", "Search the product catalog"),
+    ("track", "Track a product URL"),
+    ("watch", "Watch a product id"),
+    ("alerts", "List price alerts"),
+    ("help", "Show commands"),
+]
+
+
+async def set_bot_commands(session, token: str, commands: list[tuple[str, str]]) -> None:
+    """Publish the command list to Telegram's "/" menu (best effort)."""
+    url = f"https://api.telegram.org/bot{token}/setMyCommands"
+    payload = {
+        "commands": [{"command": name, "description": text} for name, text in commands]
+    }
+    async with session.post(url, json=payload, timeout=15) as response:
+        if response.status >= 400:
+            body = await response.text()
+            raise RuntimeError(f"setMyCommands failed: HTTP {response.status} {body[:200]}")
 
 
 class TelegramFrontend:
@@ -75,6 +101,9 @@ class TelegramFrontend:
             self.hass.bus.async_listen(EVENT_TELEGRAM_TEXT, self._on_text),
             self.hass.bus.async_listen(EVENT_PRICE_CHANGED, self._on_price_changed),
         ]
+
+        self._async_check_allowed_chats()
+        self.hass.async_create_task(self._async_register_commands())
 
         if not self._service_available():
             _LOGGER.info(
@@ -117,6 +146,52 @@ class TelegramFrontend:
             )
         except Exception as err:  # noqa: BLE001 - a failed reply must not kill the listener
             _LOGGER.warning("Telegram send failed: %s", err)
+
+    async def _async_register_commands(self) -> None:
+        """Make the commands visible in Telegram's "/" menu."""
+        entries = self.hass.config_entries.async_entries(TELEGRAM_DOMAIN)
+        if not entries:
+            return
+
+        session = async_get_clientsession(self.hass)
+        for entry in entries:
+            token = entry.data.get("api_key")
+            if not token:
+                continue
+            try:
+                await set_bot_commands(session, str(token), BOT_COMMANDS)
+                _LOGGER.debug("Registered the Pricewatcha command menu on %s", entry.title)
+            except Exception as err:  # noqa: BLE001 - cosmetic, never fatal
+                _LOGGER.debug("Could not register Telegram commands: %s", err)
+
+    @callback
+    def _async_check_allowed_chats(self) -> None:
+        """Warn loudly when the bot will drop every message.
+
+        Since HA 2026.2 a Telegram bot ignores chats that are not added as allowed-chat
+        subentries, so this is the most likely reason for a silent bot.
+        """
+        entries = self.hass.config_entries.async_entries(TELEGRAM_DOMAIN)
+        if not entries:
+            return
+
+        without_chat = [entry for entry in entries if not entry.subentries]
+        if len(without_chat) == len(entries):
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                ISSUE_NO_ALLOWED_CHAT,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_NO_ALLOWED_CHAT,
+            )
+            _LOGGER.warning(
+                "The Telegram bot has no allowed chats, so Home Assistant drops every message "
+                "before Pricewatcha can answer it. Open Settings -> Devices & services -> "
+                "Telegram bot -> Add allowed chat, enter your chat id, then message the bot again"
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_NO_ALLOWED_CHAT)
 
     async def _async_authorise(self, chat_id: int) -> bool:
         """The first chat to write becomes the owner; others are refused."""
