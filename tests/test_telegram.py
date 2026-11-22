@@ -175,13 +175,19 @@ class FakeAdvisor:
     """Duck-typed stand-in for AIAdvisor."""
 
     def __init__(
-        self, text="669 € ist ein guter Preis.", available=True, error=None, web_available=False
+        self,
+        text="669 € ist ein guter Preis.",
+        available=True,
+        error=None,
+        web_available=False,
+        citations=None,
     ):
         self.available = available
         self.web_available = web_available
         self.language = "de"
         self.text = text
         self.error = error
+        self.citations = citations or []
         self.last_error = None
         self.calls: list[tuple[dict, str | None]] = []
         self.previous: list[str | None] = []
@@ -203,6 +209,7 @@ class FakeAdvisor:
             model="fake-model",
             cost_usd=0.0001,
             spent_today=0.002,
+            citations=self.citations,
         )
 
 
@@ -989,5 +996,98 @@ def test_alert_command_explains_the_syntax():
         assert coordinator.client.updated_alerts == []
         assert "Nutzung" not in hass.services.calls[-1][2]["message"]
         assert "Usage: /alert 1324 min 620" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_ask_stores_its_sources_and_track_uses_the_number():
+    advisor = FakeAdvisor(
+        citations=[
+            {"url": "https://shop.example/better", "title": "Better offer"},
+            {"url": "https://shop.example/other", "title": "Other offer"},
+        ]
+    )
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": ["1"]})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.tracked == ["https://shop.example/better"]
+        assert "Tracking gestartet: completed" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_track_without_an_argument_lists_the_stored_offers():
+    advisor = FakeAdvisor(
+        citations=[{"url": "https://shop.example/better", "title": "Better offer"}]
+    )
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": []})
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "Web-Angebote aus der letzten Antwort" in message
+        assert "https://shop.example/better" in message
+
+    run(scenario())
+
+
+def test_track_rejects_an_unknown_offer_number_by_showing_the_list():
+    advisor = FakeAdvisor(
+        citations=[{"url": "https://shop.example/better", "title": "Better offer"}]
+    )
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": ["9"]})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.tracked == []
+        assert "Web-Angebote aus der letzten Antwort" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_stored_offers_survive_a_restart():
+    advisor = FakeAdvisor(
+        citations=[{"url": "https://shop.example/better", "title": "Better offer"}]
+    )
+
+    async def scenario():
+        hass, _, frontend = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+        frontend.async_stop()
+
+        new_hass = FakeHass()
+        coordinator = FakeCoordinator()
+        new_frontend = TelegramFrontend(
+            new_hass, coordinator, 2.0, advisor=FakeAdvisor(), language="en"
+        )
+        await new_frontend.async_start()
+        new_hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": ["1"]})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.tracked == ["https://shop.example/better"]
 
     run(scenario())

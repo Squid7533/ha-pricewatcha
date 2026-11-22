@@ -80,6 +80,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ai_label": "AI take",
         "ai_answer": "Answer",
         "ai_unavailable": "AI unavailable",
+        "sources": "Sources",
+        "track_hint": "To watch one: /track 1",
+        "offers_header": "Web offers from the last answer:",
+        "offers_empty": "No web offers stored. Run /ask first, then /track <number>.",
+        "offers_hint": "Watch one with /track <number>, or paste a URL.",
         "today": "today",
     },
     "de": {
@@ -135,6 +140,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ai_label": "Einschätzung",
         "ai_answer": "Antwort",
         "ai_unavailable": "KI nicht verfügbar",
+        "sources": "Quellen",
+        "track_hint": "Zum Beobachten: /track 1",
+        "offers_header": "Web-Angebote aus der letzten Antwort:",
+        "offers_empty": "Keine Web-Angebote gespeichert. Zuerst /ask ausführen, dann /track <Nummer>.",
+        "offers_hint": "Eines mit /track <Nummer> beobachten oder eine URL einfügen.",
         "today": "heute",
     },
 }
@@ -656,15 +666,19 @@ def format_ai_section(
         if isinstance(citation, dict) and str(citation.get("url") or "").startswith("http")
     ]
     if citations:
-        lines += ["", f"<b>{'Quellen' if german else 'Sources'}</b>"]
+        lines += ["", f"<b>{_t(language, 'sources')}</b>"]
         seen: set[str] = set()
+        number = 0
         for citation in citations[:4]:
             url = str(citation["url"])
             if url in seen:
                 continue
             seen.add(url)
+            number += 1
             title = str(citation.get("title") or url)
-            lines.append(f'· <a href="{_esc_attr(url)}">{_esc(title)}</a>')
+            lines.append(f'{number}. <a href="{_esc_attr(url)}">{_esc(title)}</a>')
+        if number:
+            lines += ["", f"<i>{_t(language, 'track_hint')}</i>"]
     lines += ["", f"<i>{_esc(footer)}</i>"]
     return "\n".join(lines)
 
@@ -757,3 +771,17 @@ def format_alert_updated(alert: dict[str, Any], language: str = "en") -> str:
         detail += f" {_t(language, 'paused')}"
     header = _t(language, "alert_updated", id=_esc(alert_id))
     return f"<b>{header}</b>\n{name} — {detail}"
+
+
+def format_offer_list(offers: list[dict[str, Any]], language: str = "en") -> str:
+    """The web offers stored after /ask, numbered for /track N."""
+    usable = [offer for offer in offers if str(offer.get("url") or "").startswith("http")]
+    if not usable:
+        return _t(language, "offers_empty")
+    lines = [f"<b>{_t(language, 'offers_header')}</b>"]
+    for index, offer in enumerate(usable[:10], start=1):
+        url = str(offer["url"])
+        title = str(offer.get("title") or url)
+        lines.append(f'{index}. <a href="{_esc_attr(url)}">{_esc(title)}</a>')
+    lines += ["", f"<i>{_t(language, 'offers_hint')}</i>"]
+    return "\n".join(lines)

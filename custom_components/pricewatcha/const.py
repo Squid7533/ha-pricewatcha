@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.4.7"
+VERSION: Final = "0.4.8"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.

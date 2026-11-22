@@ -21,7 +21,7 @@ the account features (watchlist, price alerts) need a free
   the answer.
 - **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts`,
   `/alert`, `/reset` from your phone, plus price-drop pushes, with no YAML and no chat
-  id to look up.
+  id to look up. `/track 1` watches a web offer the last `/ask` found.
 - **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
   plus `/ask` follow-ups with current web results and sources. Off by default; the
@@ -175,6 +175,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | anything without a slash | a question after `/deal` becomes `/ask`; otherwise same as `/deal` |
 | `/search iphone 18 pro` | raw catalog matches with prices and shops |
 | `/track <url>` | track a URL and watch it |
+| `/track 1` | watch the first web offer from the last `/ask`; `/track` alone lists them |
 | `/watch <product_id>` | watch a catalog product |
 | `/alerts` | your price alerts |
 | `/alert 1324 min 620` | change an existing alert: `min`/`max` (or `off`), `drop on/off`, `rise on/off`, `pause`, `resume`, `name …` |
@@ -185,6 +186,11 @@ the first chat that writes to the bot becomes the owner and is remembered.
 `update_alert` services). The id comes from `/alerts`; only the field you name changes,
 e.g. `/alert 1324 min 620`, `/alert 1324 drop on`, `/alert 1324 pause` or
 `/alert 1324 name Black Friday`.
+
+When `/ask` used the web, its sources are numbered under the answer and stored with the
+conversation. `/track 1` watches the first one without pasting a URL; `/track` without an
+argument lists the current sources. This works after a restart too, for as long as the
+conversation is kept.
 
 The last `/deal` (payload, AI assessment and the last few questions) is remembered
 **per chat for 24 hours**, across Home Assistant restarts: `/ask` works without a new

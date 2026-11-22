@@ -535,9 +535,11 @@ _ASK_WEB_PROMPTS = {
         "bis fünf Sätzen (höchstens 150 Wörter).\n"
         "Trenne klar zwischen Katalogdaten (unten) und Web-Funden. Nenne externe Preise "
         "nur mit Quelle; die Quellen werden automatisch unter deiner Antwort angezeigt. "
-        "Erfinde keine Quellen und keine Preise. Wenn es um künftige Aktionen geht "
-        "(z. B. Black Friday), gib eine begründete Einschätzung mit Unsicherheit, "
-        "gestützt auf den Preisverlauf und die Web-Funde.\n"
+        "Wenn ein Web-Fund günstiger ist als der beste Katalogpreis, nenne ihn "
+        "ausdrücklich als möglicherweise besseres Angebot. Erfinde keine Quellen und "
+        "keine Preise. Wenn es um künftige Aktionen geht (z. B. Black Friday), gib eine "
+        "begründete Einschätzung mit Unsicherheit, gestützt auf den Preisverlauf und "
+        "die Web-Funde.\n"
         "Regeln: keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis; "
         "antworte auf Deutsch."
     ),
@@ -548,10 +550,11 @@ _ASK_WEB_PROMPTS = {
         "question benefits from it. Answer in three to five sentences (at most 150 "
         "words).\n"
         "Separate catalog data (below) from web findings. Mention an external price "
-        "only with a source; the sources are shown automatically below your answer. "
-        "Invent no sources and no prices. For future sales (e.g. Black Friday), give a "
-        "reasoned estimate with uncertainty, based on the price history and the web "
-        "findings.\n"
+        "only with a source; the sources are shown automatically below your answer. If "
+        "a web result is cheaper than the best catalog price, call it out as a possibly "
+        "better offer. Invent no sources and no prices. For future sales (e.g. Black "
+        "Friday), give a reasoned estimate with uncertainty, based on the price history "
+        "and the web findings.\n"
         "Rules: no tables, no markdown, no bullet points, no emojis; answer in English."
     ),
 }
@@ -565,9 +568,11 @@ _ASK_RESULTS_PROMPTS = {
         "die Frage in drei bis fünf Sätzen (höchstens 150 Wörter).\n"
         "Trenne klar zwischen Katalogdaten (unten) und Web-Funden. Nenne externe Preise "
         "nur, wenn sie in den Websuchergebnissen stehen, und nenne die Quelle "
-        "(Seitenname). Die Quellen werden automatisch unter deiner Antwort angezeigt. "
-        "Erfinde keine Quellen, Preise oder Angebote; wenn die Ergebnisse die Frage "
-        "nicht beantworten, sage das.\n"
+        "(Seitenname oder Nummer). Wenn ein Web-Fund günstiger ist als der beste "
+        "Katalogpreis, nenne ihn ausdrücklich als möglicherweise besseres Angebot. Die "
+        "Quellen werden automatisch unter deiner Antwort angezeigt. Erfinde keine "
+        "Quellen, Preise oder Angebote; wenn die Ergebnisse die Frage nicht beantworten, "
+        "sage das.\n"
         "Wenn es um künftige Aktionen geht (z. B. Black Friday), gib eine begründete "
         "Einschätzung mit Unsicherheit, gestützt auf den Preisverlauf und die "
         "Web-Funde.\n"
@@ -581,9 +586,11 @@ _ASK_RESULTS_PROMPTS = {
         "sales and news when they answer the question. Answer in three to five "
         "sentences (at most 150 words).\n"
         "Separate catalog data (below) from web findings. Mention an external price "
-        "only when it appears in the search results, and name the source (site name). "
-        "The sources are shown automatically below your answer. Invent no sources, "
-        "prices or offers; if the results do not answer the question, say so.\n"
+        "only when it appears in the search results, and name the source (site name or "
+        "number). If a web result is cheaper than the best catalog price, call it out "
+        "as a possibly better offer. The sources are shown automatically below your "
+        "answer. Invent no sources, prices or offers; if the results do not answer the "
+        "question, say so.\n"
         "For future sales (e.g. Black Friday), give a reasoned estimate with "
         "uncertainty, based on the price history and the search results.\n"
         "Rules: no tables, no markdown, no bullet points, no emojis; answer in English."
@@ -854,7 +861,10 @@ class AIAdvisor:
                 tail += "\n\nNutze die Websuche für aktuelle Angebote und Aktionen."
             if web_results:
                 results = json.dumps(
-                    [item.to_dict() for item in web_results],
+                    [
+                        {"index": index, **item.to_dict()}
+                        for index, item in enumerate(web_results, start=1)
+                    ],
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
@@ -880,7 +890,10 @@ class AIAdvisor:
             tail += "\n\nUse the web search for current offers and sales."
         if web_results:
             results = json.dumps(
-                [item.to_dict() for item in web_results],
+                [
+                    {"index": index, **item.to_dict()}
+                    for index, item in enumerate(web_results, start=1)
+                ],
                 ensure_ascii=False,
                 separators=(",", ":"),
             )

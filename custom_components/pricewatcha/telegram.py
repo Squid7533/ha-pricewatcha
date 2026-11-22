@@ -34,6 +34,7 @@ from .const import (
 from .format import (
     format_ai_section,
     format_alert_updated,
+    format_offer_list,
     format_photo_caption,
     format_ai_unavailable,
     format_alerts,
@@ -131,6 +132,7 @@ class TelegramFrontend:
         self._last_deals: dict[int, dict[str, Any]] = {}
         self._last_assessments: dict[int, str] = {}
         self._last_history: dict[int, list[dict[str, str]]] = {}
+        self._last_offers: dict[int, list[dict[str, str]]] = {}
         self._memory_updated: dict[int, float] = {}
         self._memory_lock = asyncio.Lock()
         self._conversations: Store[dict[str, Any]] | None = None
@@ -275,6 +277,14 @@ class TelegramFrontend:
                 self._last_history[chat_id] = [
                     item for item in history if isinstance(item, dict)
                 ][-CONVERSATION_HISTORY_MAX:]
+            offers = entry.get("offers")
+            if isinstance(offers, list):
+                self._last_offers[chat_id] = [
+                    item
+                    for item in offers
+                    if isinstance(item, dict)
+                    and str(item.get("url") or "").startswith("http")
+                ][:10]
             self._memory_updated[chat_id] = updated
 
     async def _async_save_memory(self) -> None:
@@ -294,6 +304,9 @@ class TelegramFrontend:
                 history = self._last_history.get(chat_id)
                 if history:
                     entry["history"] = history[-CONVERSATION_HISTORY_MAX:]
+                offers = self._last_offers.get(chat_id)
+                if offers:
+                    entry["offers"] = offers[:10]
                 chats[str(chat_id)] = entry
             await self._conversations.async_save({"chats": chats})
 
@@ -315,6 +328,7 @@ class TelegramFrontend:
         self._last_deals.pop(chat_id, None)
         self._last_assessments.pop(chat_id, None)
         self._last_history.pop(chat_id, None)
+        self._last_offers.pop(chat_id, None)
         self._memory_updated.pop(chat_id, None)
         await self._async_save_memory()
         await self._async_send(chat_id, format_reset(self._language))
@@ -501,7 +515,7 @@ class TelegramFrontend:
         elif command == "/search":
             await self._async_search(chat_id, rest)
         elif command == "/track":
-            await self._async_track(chat_id, args[0] if args else "")
+            await self._async_track(chat_id, args)
         elif command == "/watch":
             await self._async_watch(chat_id, args[0] if args else "")
         elif command == "/alerts":
@@ -567,6 +581,7 @@ class TelegramFrontend:
         self._last_deals[chat_id] = payload
         self._last_assessments.pop(chat_id, None)
         self._last_history[chat_id] = []
+        self._last_offers.pop(chat_id, None)
         self._touch_memory(chat_id)
         await self._async_send_photo(chat_id, payload)
 
@@ -644,6 +659,15 @@ class TelegramFrontend:
                 "a": result.text[:CONVERSATION_TEXT_MAX],
             },
         ][-CONVERSATION_HISTORY_MAX:]
+        offers = [
+            {"url": str(item["url"]), "title": str(item.get("title") or item["url"])}
+            for item in (result.citations or [])
+            if isinstance(item, dict) and str(item.get("url") or "").startswith("http")
+        ][:10]
+        if offers:
+            self._last_offers[chat_id] = offers
+        else:
+            self._last_offers.pop(chat_id, None)
         self._touch_memory(chat_id)
         await self._async_save_memory()
 
@@ -665,9 +689,27 @@ class TelegramFrontend:
             ),
         )
 
-    async def _async_track(self, chat_id: int, url: str) -> None:
-        if not url.startswith("http"):
-            await self._async_send(chat_id, format_usage("/track", "https://shop.example/product", self._language))
+    async def _async_track(self, chat_id: int, args: list[str]) -> None:
+        language = self._language
+        raw = args[0].strip() if args else ""
+        if not raw:
+            await self._async_send(
+                chat_id, format_offer_list(self._last_offers.get(chat_id, []), language)
+            )
+            return
+        if raw.isdigit():
+            offers = self._last_offers.get(chat_id, [])
+            index = int(raw) - 1
+            if index < 0 or index >= len(offers):
+                await self._async_send(chat_id, format_offer_list(offers, language))
+                return
+            url = offers[index]["url"]
+        elif raw.startswith("http"):
+            url = raw
+        else:
+            await self._async_send(
+                chat_id, format_usage("/track", "https://shop.example/product", language)
+            )
             return
         try:
             payload = await self._coordinator.client.track(url, watch=True)
@@ -675,7 +717,7 @@ class TelegramFrontend:
             _LOGGER.debug("track failed", exc_info=True)
             await self._async_send(chat_id, self._error_text(err))
             return
-        await self._async_send(chat_id, format_track(payload, self._language))
+        await self._async_send(chat_id, format_track(payload, language))
         await self._coordinator.async_request_refresh()
 
     async def _async_watch(self, chat_id: int, product_id: str) -> None:

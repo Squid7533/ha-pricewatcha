@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from custom_components.pricewatcha.format import (
     format_ai_section,
     format_alert_updated,
+    format_offer_list,
     format_photo_caption,
     format_ai_unavailable,
     format_alerts,
@@ -388,8 +389,9 @@ def test_ai_section_lists_sources():
     )
     text = format_ai_section(result, "de", answer=True)
     assert "<b>Quellen</b>" in text
-    assert '<a href="https://example.com/a">GIGA</a>' in text
-    assert '<a href="https://example.com/b">mydealz</a>' in text
+    assert '1. <a href="https://example.com/a">GIGA</a>' in text
+    assert '2. <a href="https://example.com/b">mydealz</a>' in text
+    assert "Zum Beobachten: /track 1" in text
 
 
 def test_photo_caption_has_price_shop_condition_and_name():
@@ -419,3 +421,20 @@ def test_alert_updated_confirmation():
     assert "Preisalarm #77 aktualisiert" in text
     assert "620 €" in text
     assert "(pausiert)" in text
+
+
+def test_offer_list_is_numbered_for_track():
+    text = format_offer_list(
+        [
+            {"url": "https://example.com/a", "title": "Better offer"},
+            {"url": "https://example.com/b", "title": "Other"},
+        ],
+        "de",
+    )
+    assert "Web-Angebote aus der letzten Antwort" in text
+    assert '1. <a href="https://example.com/a">Better offer</a>' in text
+    assert "Eines mit /track <Nummer>" in text
+
+
+def test_empty_offer_list_explains_the_order():
+    assert "Zuerst /ask" in format_offer_list([], "de")
