@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.pricewatcha import telegram as telegram_module
-from custom_components.pricewatcha.ai import AIResult
+from custom_components.pricewatcha.ai import AIPlan, AIResult, AIToolCall
 from custom_components.pricewatcha.media import ProductMedia
 from custom_components.pricewatcha.telegram import TelegramFrontend
 
@@ -130,7 +130,11 @@ class FakeClient:
     def __init__(self) -> None:
         self.tracked: list[str] = []
         self.watched: list[str] = []
+        self.unwatched: list[str] = []
         self.updated_alerts: list[tuple[int, dict]] = []
+        self.created_alerts: list[dict] = []
+        self.deleted_alerts: list[int] = []
+        self.alerts_list: list[dict] = []
 
     async def search(self, query, limit=50):
         return [
@@ -154,8 +158,68 @@ class FakeClient:
         self.watched.append(product_id)
         return {"product_id": product_id, "watching": True}
 
+    async def unwatch(self, product_id):
+        self.unwatched.append(product_id)
+        return {"product_id": product_id, "watching": False}
+
+    async def price_history(self, product_id):
+        return {
+            "product_id": product_id,
+            "currency": "EUR",
+            "current_price": 669,
+            "historical_low": 669,
+            "historical_high": 739,
+            "average_price": 699,
+            "trend": "downward",
+            "data_points": [
+                {"date": "2026-10-13", "price": 739},
+                {"date": "2026-11-18", "price": 669},
+            ],
+        }
+
+    async def product(self, product_id):
+        return {
+            "product_id": product_id,
+            "name": "iPhone Air",
+            "shop": "Asgoodasnew",
+            "current_price": 669,
+            "currency": "EUR",
+            "status": "active",
+            "product_url": "https://example.com/a",
+            "last_checked_at": "2026-11-21T18:50:37Z",
+        }
+
+    async def health(self):
+        return {"status": "ok"}
+
+    async def job(self, job_id):
+        return {"status": "completed", "product": {"name": "iPhone", "current_price": 669}}
+
     async def alerts(self):
-        return []
+        return list(self.alerts_list)
+
+    async def create_alert(self, **kwargs):
+        self.created_alerts.append(kwargs)
+        alert = {
+            "alert_id": 1325,
+            "name": kwargs.get("name") or "Alert",
+            "currency": "EUR",
+            "is_active": True,
+            "notify_on_drop": bool(kwargs.get("notify_on_drop")),
+            "notify_on_rise": bool(kwargs.get("notify_on_rise")),
+            "min_threshold_price": kwargs.get("min_threshold_price"),
+            "max_threshold_price": kwargs.get("max_threshold_price"),
+        }
+        return alert
+
+    async def get_alert(self, alert_id):
+        for alert in self.alerts_list:
+            if alert.get("alert_id") == alert_id:
+                return alert
+        return {"alert_id": alert_id, "name": "Deal range", "is_active": True}
+
+    async def delete_alert(self, alert_id):
+        self.deleted_alerts.append(alert_id)
 
     async def update_alert(self, alert_id, **changes):
         self.updated_alerts.append((alert_id, changes))
@@ -193,6 +257,13 @@ class FakeAdvisor:
         self.previous: list[str | None] = []
         self.web_calls: list[bool] = []
         self.history_calls: list[list[dict[str, str]] | None] = []
+        self.plan = None
+        self.plan_text = ""
+        self.plan_calls: list[tuple[str, dict]] = []
+
+    async def async_plan(self, text, context):
+        self.plan_calls.append((text, context))
+        return self.plan
 
     async def async_advise(
         self, payload, question=None, previous=None, *, web=False, history=None
@@ -218,6 +289,7 @@ class FakeCoordinator:
         self.client = FakeClient()
         self.refreshes = 0
         self.deal_calls = 0
+        self.data: dict = {}
 
     async def async_find_best_deals(self, query, **kwargs):
         self.deal_calls += 1
@@ -453,7 +525,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "alert", "reset", "help"]
+    assert names == ["deal", "ask", "search", "track", "watch", "watchlist", "history", "status", "refresh", "alerts", "alert", "reset", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -1089,5 +1161,211 @@ def test_stored_offers_survive_a_restart():
         await asyncio.sleep(0.05)
 
         assert coordinator.client.tracked == ["https://shop.example/better"]
+
+    run(scenario())
+
+
+def test_watch_uses_the_last_deal_result_number():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/watch", "args": ["1"]})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.watched == ["prod_a"]
+        assert "Now watching prod_a" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_watchlist_and_unwatch_use_numbers():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        coordinator.data = {
+            "prod_a": {
+                "name": "iPhone Air",
+                "current_price": 669,
+                "currency": "EUR",
+                "shop": "Asgoodasnew",
+            }
+        }
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/watchlist", "args": []})
+        await asyncio.sleep(0.05)
+        message = hass.services.calls[-1][2]["message"]
+        assert "1. iPhone Air — 669 € · Asgoodasnew" in message
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/unwatch", "args": ["1"]})
+        await asyncio.sleep(0.05)
+        assert coordinator.client.unwatched == ["prod_a"]
+        assert "no longer watching" in hass.services.calls[-1][2]["message"].lower()
+
+    run(scenario())
+
+
+def test_history_and_product_use_the_last_result_number():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/history", "args": ["1"]})
+        await asyncio.sleep(0.05)
+        assert "Price history" in hass.services.calls[-1][2]["message"]
+        assert "Low 669 €" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/product", "args": ["1"]})
+        await asyncio.sleep(0.05)
+        assert "Product: iPhone Air" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_status_and_refresh():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        coordinator.data = {"prod_a": {"name": "iPhone", "current_price": 669}}
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/status", "args": []})
+        await asyncio.sleep(0.05)
+        message = hass.services.calls[-1][2]["message"]
+        assert "Pricewatcha status" in message
+        assert "Watchlist: 1" in message
+        assert "reachable" in message
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/refresh", "args": []})
+        await asyncio.sleep(0.05)
+        assert coordinator.refreshes >= 1
+        assert "Watchlist refreshed" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_alert_new_show_and_delete():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        coordinator.client.alerts_list = [
+            {
+                "alert_id": 1324,
+                "name": "Deal range",
+                "currency": "EUR",
+                "min_threshold_price": 620,
+                "is_active": True,
+            }
+        ]
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["new", "1", "min", "620", "drop"]},
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.created_alerts == [
+            {"product_id": "prod_a", "min_threshold_price": 620.0, "notify_on_drop": True}
+        ]
+        assert "Alert #1325 created" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["show", "1324"]},
+        )
+        await asyncio.sleep(0.05)
+        assert "Alert #1324" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["delete", "1324"]},
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.deleted_alerts == [1324]
+        assert "deleted" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_natural_language_watch_uses_the_stored_offer():
+    advisor = FakeAdvisor(citations=[{"url": "https://shop.example/better", "title": "Better offer"}])
+    advisor.plan = AIPlan(calls=[AIToolCall(name="watch", arguments={"ref": "w1"})])
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+
+        hass.bus.fire(
+            "telegram_text",
+            {"chat_id": 1, "text": "beobachte das angebot von Better offer"},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.tracked == ["https://shop.example/better"]
+        assert advisor.plan_calls, "the model should have been asked to plan"
+        assert "w1" in str(advisor.plan_calls[-1][1])
+
+    run(scenario())
+
+
+def test_natural_language_updates_an_alert():
+    advisor = FakeAdvisor()
+    advisor.plan = AIPlan(
+        calls=[AIToolCall(name="update_alert", arguments={"alert_ref": "current", "min": 400})]
+    )
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        coordinator.client.alerts_list = [
+            {
+                "alert_id": 1324,
+                "name": "Deal range",
+                "currency": "EUR",
+                "min_threshold_price": 620,
+                "is_active": True,
+            }
+        ]
+        hass.bus.fire(
+            "telegram_text",
+            {"chat_id": 1, "text": "ändere den preisalarm auf 400 eur"},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (1324, {"min_threshold_price": 400.0})
+        ]
+
+    run(scenario())
+
+
+def test_natural_language_lists_the_watchlist():
+    advisor = FakeAdvisor()
+    advisor.plan = AIPlan(calls=[AIToolCall(name="list_watchlist", arguments={})])
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        coordinator.data = {
+            "prod_a": {"name": "iPhone Air", "current_price": 669, "shop": "Asgoodasnew"}
+        }
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "zeig meine watchlist"})
+        await asyncio.sleep(0.05)
+
+        assert "iPhone Air" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_natural_language_reports_a_provider_without_tools():
+    advisor = FakeAdvisor()
+    advisor.last_error = "tools_unsupported"
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "beobachte das angebot"})
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "keine Tools" in message
+        assert "watch" in message
 
     run(scenario())

@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 138 tests pass.
+breaks the deterministic reply; 151 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,7 +140,7 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 138 tests pass.
+blocked shop sends no photo and no error; 151 tests pass.
 
 ## 3d — conversation memory (done in 0.4.5)
 
@@ -162,7 +162,7 @@ conversation.
 **Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
 it and `/ask` asks for a new `/deal`; entries older than the configured 3–7 days are
 ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
-138 tests pass.
+151 tests pass.
 
 ## Release plan
 
@@ -175,3 +175,16 @@ ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
 | 3c | 0.4.4 | product photos / condition |
 | 3d | 0.4.5 | persistent conversation memory (`/reset`) |
 | 3d.1 | 0.4.6 | conversation TTL configurable 3–7 days, default 7 |
+
+
+## After phase 3 — 0.5.0 command coverage and natural language
+
+- Numbered result context for `/deal` and `/search`: `/watch 1`, `/history 1`,
+  `/product 1`, `/alert new 1 min 620`.
+- `/watchlist`, `/unwatch 1`, `/status`, `/refresh`, `/alert show`, `/alert delete`.
+- `/track` polls the ingestion job until it finishes instead of only saying "next poll".
+- Free-text actions are planned by the model via function tools (`ACTION_TOOLS`):
+  watch/unwatch, watchlist, history, product, alert create/update/delete/show, best deal,
+  search, track, status, refresh, help. References come from the last catalog results
+  (`1`), the last `/ask` sources (`w1`), the watchlist (`l1`) and alerts (`a1324`).
+  Providers without tool calls get a hint to use the commands.

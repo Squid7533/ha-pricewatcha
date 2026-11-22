@@ -172,20 +172,27 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | --- | --- |
 | `/deal iphone 18 pro` | best value, condition, price history, links and a verdict |
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
-| anything without a slash | a question after `/deal` becomes `/ask`; otherwise same as `/deal` |
-| `/search iphone 18 pro` | raw catalog matches with prices and shops |
+| anything without a slash | an action goes to the AI planner; a question becomes `/ask`; otherwise a search |
+| `/search iphone 18 pro` | numbered catalog matches with prices and shops |
 | `/track <url>` | track a URL and watch it |
 | `/track 1` | watch the first web offer from the last `/ask`; `/track` alone lists them |
-| `/watch <product_id>` | watch a catalog product |
+| `/watch 1` | watch the first result from the last `/deal` or `/search` |
+| `/unwatch 1` | stop watching the first entry from `/watchlist` |
+| `/watchlist` | watched products with prices and numbers |
+| `/history 1` | price history of a result or watched product |
+| `/product 1` | details of a result or watched product |
 | `/alerts` | your price alerts |
-| `/alert 1324 min 620` | change an existing alert: `min`/`max` (or `off`), `drop on/off`, `rise on/off`, `pause`, `resume`, `name …` |
+| `/alert 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop on/off`, `rise on/off`, `pause`, `resume`, `name …` |
+| `/alert new 1 min 620 name …` | create an alert for the first result |
+| `/alert show 1324` / `/alert delete 1324` | show or delete an alert |
+| `/status` | watchlist size, last poll, AI spend, API reachability |
+| `/refresh` | poll now |
 | `/reset` | forget the current conversation |
 | `/help` | the command list |
 
-`/alert` is the bot-side editor for alerts created elsewhere (the `create_alert` /
-`update_alert` services). The id comes from `/alerts`; only the field you name changes,
-e.g. `/alert 1324 min 620`, `/alert 1324 drop on`, `/alert 1324 pause` or
-`/alert 1324 name Black Friday`.
+`/alert` is the bot-side manager: `/alert new 1 min 620` creates an alert for the
+first result, `/alert 1324 …` changes only the field you name, and `/alert show` /
+`/alert delete` handle the rest. The ids come from `/alerts`.
 
 When `/ask` used the web, its sources are numbered under the answer and stored with the
 conversation. `/track 1` watches the first one without pasting a URL; `/track` without an
@@ -193,11 +200,29 @@ argument lists the current sources. This works after a restart too, for as long 
 conversation is kept.
 
 The last `/deal` (payload, AI assessment and the last few questions) is remembered
-**per chat for 24 hours**, across Home Assistant restarts: `/ask` works without a new
-search, and with AI configured a plain question after a deal is treated as a follow-up.
-`/reset` forgets it;
-a new `/deal` starts a fresh conversation. The memory lives in
+**per chat for 3–7 days** (default 7, `Conversation memory (days)` under General), across
+Home Assistant restarts: `/ask` works without a new search, and with AI configured a
+plain question after a deal is treated as a follow-up. `/reset` forgets it; a new
+`/deal` starts a fresh conversation. The memory lives in
 `config/.storage/pricewatcha.conversations`.
+
+### Talking to the bot
+
+With an AI provider that supports tool calls (DeepSeek, OpenAI and most
+OpenAI-compatible endpoints), free text that looks like an action is planned by the
+model, not matched by a regex:
+
+- „beobachte das Angebot von MediaMarkt“
+- „ändere den Preisalarm auf 400 Euro“
+- „zeig meine Watchlist“
+- „lösche Alarm 1324“
+- „wie war der Preisverlauf?“
+
+The planner sees the last catalog results (`1`, `2`, …), the web offers from `/ask`
+(`w1`, …), the watchlist (`l1`, …) and the alerts (`a1324`), and calls exactly one of the
+bot actions. The bot then performs it and answers with the same formatting as the
+command. Providers without tool calls get a hint to use `/watch`, `/alert`, `/history`
+and friends instead.
 
 A `/deal` reply looks like this (bold prices and links render in Telegram). When the
 shop exposes a product image, a photo follows the table — switch it off under

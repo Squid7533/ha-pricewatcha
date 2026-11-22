@@ -129,6 +129,10 @@ class AIResponseError(AIError):
     """The provider answered, but not with usable content."""
 
 
+class AIToolsUnsupported(AIError):
+    """The provider does not accept function tools."""
+
+
 @dataclass(slots=True)
 class AIConfig:
     """The AI settings as stored in the config entry options."""
@@ -210,6 +214,26 @@ def _as_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+@dataclass(slots=True)
+class AIToolCall:
+    """One function call the model requested."""
+
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(slots=True)
+class AIPlan:
+    """The result of an action-planning call."""
+
+    calls: list[AIToolCall]
+    text: str = ""
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
 
 
 @dataclass(slots=True)
@@ -324,6 +348,108 @@ class AIClient:
             + result.output_tokens * config.output_cost_per_mtok
         ) / 1_000_000
         return result
+
+
+    async def async_plan(
+        self,
+        system: str,
+        user: str,
+        tools: list[dict[str, Any]],
+    ) -> AIPlan:
+        """Ask the model which action to take, using function calling."""
+        config = self._config
+        if config.provider != AI_PROVIDER_OPENAI:
+            raise AIToolsUnsupported("function tools are only wired for OpenAI-compatible providers")
+
+        payload: dict[str, Any] = {
+            "model": config.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": 0.2,
+            "stream": False,
+        }
+        if "api.openai.com" in config.base_url:
+            payload["max_completion_tokens"] = 600
+        else:
+            payload["max_tokens"] = 600
+        if (
+            "deepseek" in config.base_url.lower()
+            or config.model.lower().startswith("deepseek")
+        ):
+            payload["thinking"] = {"type": "disabled"}
+        headers = {"content-type": "application/json"}
+        if config.api_key:
+            headers["authorization"] = f"Bearer {config.api_key}"
+
+        try:
+            async with asyncio.timeout(config.timeout):
+                async with self._session.post(
+                    endpoint_for(config), json=payload, headers=headers
+                ) as response:
+                    status = response.status
+                    body = await response.text()
+        except TimeoutError as err:
+            raise AIError(f"request timed out after {config.timeout}s") from err
+        except aiohttp.ClientError as err:
+            raise AIError(f"cannot connect: {err}") from err
+
+        if status in (401, 403):
+            raise AIAuthError("the provider rejected the API key")
+        if status == 429:
+            raise AIRateLimitError("the provider is rate limiting requests")
+        if status >= 400:
+            lowered = body.lower()
+            if status == 400 and ("tool" in lowered or "function" in lowered):
+                raise AIToolsUnsupported(f"HTTP 400: {body[:160]}")
+            raise AIResponseError(f"HTTP {status}: {body[:200]}")
+
+        try:
+            data = json.loads(body)
+        except ValueError as err:
+            raise AIResponseError("the provider returned invalid JSON") from err
+
+        try:
+            message = data["choices"][0].get("message") or {}
+        except (KeyError, IndexError, TypeError) as err:
+            raise AIResponseError("the provider returned no message") from err
+
+        calls: list[AIToolCall] = []
+        for raw_call in message.get("tool_calls") or []:
+            if not isinstance(raw_call, dict):
+                continue
+            function = raw_call.get("function") or {}
+            name = str(function.get("name") or "")
+            if not name:
+                continue
+            arguments: dict[str, Any] = {}
+            raw_args = function.get("arguments")
+            if isinstance(raw_args, str) and raw_args.strip():
+                try:
+                    parsed = json.loads(raw_args)
+                    if isinstance(parsed, dict):
+                        arguments = parsed
+                except ValueError:
+                    arguments = {}
+            elif isinstance(raw_args, dict):
+                arguments = raw_args
+            calls.append(AIToolCall(name=name, arguments=arguments))
+
+        text = str(message.get("content") or "")
+        if not calls and not text.strip():
+            raise AIResponseError("the provider returned neither an answer nor a tool call")
+
+        usage = data.get("usage") or {}
+        return AIPlan(
+            calls=calls,
+            text=text,
+            model=str(data.get("model") or ""),
+            input_tokens=_as_int(usage.get("prompt_tokens"), 0),
+            output_tokens=_as_int(usage.get("completion_tokens"), 0),
+        )
 
 
 def _parse_openai(data: dict[str, Any]) -> AIResult:
@@ -442,6 +568,17 @@ class AIUsage:
                 return False, "monthly budget"
             return True, ""
 
+    async def async_snapshot(self) -> dict[str, float]:
+        """Today's and this month's spend, for /status."""
+        async with self._lock:
+            state = await self._async_state()
+            return {
+                "spent_today": float(state["spent_today"]),
+                "spent_month": float(state["spent_month"]),
+                "daily_budget": self._config.daily_budget_usd,
+                "monthly_budget": self._config.monthly_budget_usd,
+            }
+
     async def async_record(self, cost: float) -> float:
         """Add a completed request's cost and return today's total."""
         async with self._lock:
@@ -459,6 +596,225 @@ def estimate_cost(config: AIConfig, system: str, user: str) -> float:
         input_tokens * config.input_cost_per_mtok
         + config.max_tokens * config.output_cost_per_mtok
     ) / 1_000_000
+
+
+ACTION_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "watch",
+            "description": "Watch a catalog product or a web offer. Use for 'beobachte X'.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string", "description": "Index, ref, product id, URL or name from the context"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "unwatch",
+            "description": "Stop watching a product.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_watchlist",
+            "description": "List the watched products with prices.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_alerts",
+            "description": "List the existing price alerts.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "price_history",
+            "description": "Show the price history of a product.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "product",
+            "description": "Show product details.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_alert",
+            "description": "Create a price alert for a catalog product.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "min": {"type": "number"},
+                    "max": {"type": "number"},
+                    "drop": {"type": "boolean"},
+                    "rise": {"type": "boolean"},
+                    "name": {"type": "string"},
+                },
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_alert",
+            "description": "Change an existing alert's threshold, flags, name or active state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "alert_ref": {"type": "string", "description": "Alert id, a<id>, or 'current'"},
+                    "min": {"type": "number"},
+                    "max": {"type": "number"},
+                    "drop": {"type": "boolean"},
+                    "rise": {"type": "boolean"},
+                    "active": {"type": "boolean"},
+                    "name": {"type": "string"},
+                },
+                "required": ["alert_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_alert",
+            "description": "Delete an alert.",
+            "parameters": {
+                "type": "object",
+                "properties": {"alert_ref": {"type": "string"}},
+                "required": ["alert_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_alert",
+            "description": "Show one alert.",
+            "parameters": {
+                "type": "object",
+                "properties": {"alert_ref": {"type": "string"}},
+                "required": ["alert_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "best_deal",
+            "description": "Find the best deal for a product query.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search the catalog.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "track",
+            "description": "Track a product URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "status",
+            "description": "Show the integration status.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "refresh",
+            "description": "Poll the watchlist now.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "help",
+            "description": "Show the command list.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+_ACTION_PROMPTS = {
+    "de": (
+        "Du bist der Aktionsplaner des Pricewatcha-Telegram-Bots. Der Nutzer spricht "
+        "frei. Wenn er eine Aktion will, rufe genau das passende Tool auf. Wenn er nur "
+        "eine Frage stellt, rufe kein Tool auf und antworte in ein bis zwei Sätzen.\n"
+        "Nutze ausschließlich die Referenzen aus dem Kontext: products (1, 2, ...), "
+        "offers (w1, w2, ...), watchlist (l1, ...), alerts (a<id>). Bei mehrdeutigen "
+        "oder fehlenden Referenzen rufe kein Tool auf, sondern stelle eine kurze "
+        "Rückfrage.\n"
+        "Beispiele: 'beobachte das Angebot von MediaMarkt' -> watch mit der passenden "
+        "offer-Referenz; 'ändere den Preisalarm auf 400 Euro' -> update_alert mit "
+        "min=400 und der aktuellen Alert-Referenz.\n"
+        "Antworte auf Deutsch."
+    ),
+    "en": (
+        "You are the action planner of the Pricewatcha Telegram bot. The user speaks "
+        "freely. If they want an action, call exactly the right tool. If they only ask "
+        "a question, call no tool and answer in one or two sentences.\n"
+        "Use only references from the context: products (1, 2, ...), offers (w1, ...), "
+        "watchlist (l1, ...), alerts (a<id>). If a reference is ambiguous or missing, "
+        "call no tool and ask a short clarifying question.\n"
+        "Examples: 'watch the MediaMarkt offer' -> watch with the matching offer ref; "
+        "'change the price alert to 400 EUR' -> update_alert with min=400 and the "
+        "current alert ref.\n"
+        "Answer in English."
+    ),
+}
 
 
 _ASSESSMENT_PROMPTS = {
@@ -836,6 +1192,63 @@ class AIAdvisor:
                 result.cost_usd,
             )
             return result
+
+    async def async_usage(self) -> dict[str, float]:
+        if not self.available:
+            return {}
+        return await self._usage.async_snapshot()
+
+    async def async_plan(
+        self, text: str, context: dict[str, Any]
+    ) -> AIPlan | None:
+        """Ask the model which action tool to call; ``None`` on any failure."""
+        self.last_error = None
+        if not self.available:
+            self.last_error = "not_configured"
+            return None
+
+        system = _ACTION_PROMPTS[self.language]
+        user = (
+            f"Kontext:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
+            f"\n\nNutzer sagt: {text}"
+            if self.language == "de"
+            else f"Context:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
+            f"\n\nUser says: {text}"
+        )
+        estimate = estimate_cost(self.config, system, user)
+
+        async with self._lock:
+            allowed, reason = await self._usage.async_can_spend(estimate)
+            if not allowed:
+                self.last_error = (
+                    "budget_monthly" if "monthly" in reason else "budget_daily"
+                )
+                return None
+            try:
+                plan = await self._client.async_plan(system, user, ACTION_TOOLS)
+            except AIToolsUnsupported as err:
+                self.last_error = "tools_unsupported"
+                _LOGGER.info("Action planning unavailable: %s", err)
+                return None
+            except AIAuthError as err:
+                self.last_error = "auth"
+                _LOGGER.warning("AI authentication failed: %s", err)
+                return None
+            except AIRateLimitError as err:
+                self.last_error = "rate_limit"
+                _LOGGER.warning("AI rate limited: %s", err)
+                return None
+            except AIError as err:
+                self.last_error = "timeout" if "timed out" in str(err) else "provider_error"
+                _LOGGER.warning("AI action planning failed: %s", err)
+                return None
+
+            plan.cost_usd = (
+                plan.input_tokens * self.config.input_cost_per_mtok
+                + plan.output_tokens * self.config.output_cost_per_mtok
+            ) / 1_000_000
+            await self._usage.async_record(plan.cost_usd)
+            return plan
 
     def _user_prompt(
         self,

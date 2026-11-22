@@ -163,6 +163,9 @@ class PricewatchaClient:
             items = payload
         return items if isinstance(items, list) else []
 
+    async def get_alert(self, alert_id: int) -> dict[str, Any]:
+        return await self._request("GET", f"/alerts/{alert_id}")
+
     async def create_alert(self, **kwargs: Any) -> dict[str, Any]:
         return await self._request("POST", "/alerts", json=kwargs)
 

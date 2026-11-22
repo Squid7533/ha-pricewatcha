@@ -32,9 +32,23 @@ from .const import (
     EVENT_PRICE_CHANGED,
 )
 from .format import (
+    format_action_error,
     format_ai_section,
+    format_chat_reply,
+    format_alert_created,
+    format_alert_deleted,
+    format_alert_details,
+    format_alert_not_found,
     format_alert_updated,
+    format_history,
     format_offer_list,
+    format_product,
+    format_ref_not_found,
+    format_refreshed,
+    format_search,
+    format_status,
+    format_unwatched,
+    format_watchlist,
     format_photo_caption,
     format_ai_unavailable,
     format_alerts,
@@ -42,7 +56,6 @@ from .format import (
     format_help,
     format_price_drop,
     format_reset,
-    format_search,
     format_track,
     format_usage,
     format_verdict,
@@ -73,6 +86,10 @@ BOT_COMMANDS = [
     ("search", "Search the product catalog"),
     ("track", "Track a product URL"),
     ("watch", "Watch a product id"),
+    ("watchlist", "List watched products"),
+    ("history", "Price history for a result"),
+    ("status", "Integration status"),
+    ("refresh", "Poll now"),
     ("alerts", "List price alerts"),
     ("alert", "Change a price alert"),
     ("reset", "Forget the current conversation"),
@@ -86,6 +103,10 @@ _BOT_COMMAND_LABELS = {
         "search": "Produktkatalog durchsuchen",
         "track": "Produkt-URL tracken",
         "watch": "Katalogprodukt beobachten",
+        "watchlist": "Beobachtete Produkte anzeigen",
+        "history": "Preisverlauf eines Treffers",
+        "status": "Status der Integration",
+        "refresh": "Jetzt aktualisieren",
         "alerts": "Preisalarme anzeigen",
         "alert": "Preisalarm ändern",
         "reset": "Aktuelles Gespräch vergessen",
@@ -133,6 +154,9 @@ class TelegramFrontend:
         self._last_assessments: dict[int, str] = {}
         self._last_history: dict[int, list[dict[str, str]]] = {}
         self._last_offers: dict[int, list[dict[str, str]]] = {}
+        self._last_products: dict[int, list[dict[str, Any]]] = {}
+        self._last_watchlist: dict[int, list[str]] = {}
+        self._last_alert_id: dict[int, int] = {}
         self._memory_updated: dict[int, float] = {}
         self._memory_lock = asyncio.Lock()
         self._conversations: Store[dict[str, Any]] | None = None
@@ -285,6 +309,11 @@ class TelegramFrontend:
                     if isinstance(item, dict)
                     and str(item.get("url") or "").startswith("http")
                 ][:10]
+            products = entry.get("products")
+            if isinstance(products, list):
+                self._last_products[chat_id] = [
+                    item for item in products if isinstance(item, dict)
+                ][:10]
             self._memory_updated[chat_id] = updated
 
     async def _async_save_memory(self) -> None:
@@ -307,6 +336,9 @@ class TelegramFrontend:
                 offers = self._last_offers.get(chat_id)
                 if offers:
                     entry["offers"] = offers[:10]
+                products = self._last_products.get(chat_id)
+                if products:
+                    entry["products"] = products[:10]
                 chats[str(chat_id)] = entry
             await self._conversations.async_save({"chats": chats})
 
@@ -329,9 +361,337 @@ class TelegramFrontend:
         self._last_assessments.pop(chat_id, None)
         self._last_history.pop(chat_id, None)
         self._last_offers.pop(chat_id, None)
+        self._last_products.pop(chat_id, None)
+        self._last_watchlist.pop(chat_id, None)
         self._memory_updated.pop(chat_id, None)
         await self._async_save_memory()
         await self._async_send(chat_id, format_reset(self._language))
+
+    def _store_product_context(self, chat_id: int, items: list[dict[str, Any]]) -> None:
+        products: list[dict[str, Any]] = []
+        for item in items[:10]:
+            product_id = item.get("product_id")
+            url = item.get("product_url") or item.get("url")
+            if not product_id and not url:
+                continue
+            products.append(
+                {
+                    "ref": str(len(products) + 1),
+                    "product_id": product_id,
+                    "name": item.get("name") or product_id or url,
+                    "price": item.get("current_price", item.get("price")),
+                    "currency": item.get("currency"),
+                    "shop": item.get("shop"),
+                    "url": url,
+                    "condition": item.get("condition"),
+                    "capacity": item.get("capacity"),
+                    "kind": "catalog" if product_id else "web",
+                }
+            )
+        self._last_products[chat_id] = products
+
+    def _watchlist_entries(self, chat_id: int) -> list[dict[str, Any]]:
+        data = getattr(self._coordinator, "data", None) or {}
+        ids = list(data)
+        entries: list[dict[str, Any]] = []
+        for product_id in ids:
+            product = data.get(product_id)
+            if not isinstance(product, dict):
+                continue
+            entries.append(
+                {
+                    "ref": str(len(entries) + 1),
+                    "product_id": product_id,
+                    "name": product.get("name") or product_id,
+                    "price": product.get("current_price"),
+                    "currency": product.get("currency"),
+                    "shop": product.get("shop"),
+                    "url": product.get("product_url"),
+                    "kind": "catalog",
+                }
+            )
+        return entries
+
+    def _resolve_product(self, chat_id: int, raw: str) -> dict[str, Any] | None:
+        value = str(raw or "").strip()
+        products = self._last_products.get(chat_id, [])
+        watchlist = self._watchlist_entries(chat_id)
+        if not value:
+            return None
+        if value.isdigit():
+            index = int(value) - 1
+            source = products if products else watchlist
+            if 0 <= index < len(source):
+                return source[index]
+            return None
+        if value.startswith("prod_"):
+            for entry in products + watchlist:
+                if entry.get("product_id") == value:
+                    return entry
+            return {"product_id": value, "name": value, "kind": "catalog"}
+        if value.startswith("http"):
+            return {"url": value, "name": value, "kind": "web"}
+        needle = value.casefold()
+        matches = [
+            entry
+            for entry in products + watchlist
+            if needle in str(entry.get("name") or "").casefold()
+            or needle in str(entry.get("product_id") or "").casefold()
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def _resolve_agent_target(
+        self, chat_id: int, ref: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        value = str(ref or "").strip()
+        offers = self._last_offers.get(chat_id, [])
+        if value.lower().startswith("w") and value[1:].isdigit():
+            index = int(value[1:]) - 1
+            if 0 <= index < len(offers):
+                return ("offer", offers[index])
+        if value.startswith("http"):
+            for offer in offers:
+                if offer.get("url") == value:
+                    return ("offer", offer)
+            return ("offer", {"url": value, "name": value})
+        if value.lower().startswith("l") and value[1:].isdigit():
+            entries = self._watchlist_entries(chat_id)
+            index = int(value[1:]) - 1
+            if 0 <= index < len(entries):
+                return ("product", entries[index])
+        needle = value.casefold()
+        if needle:
+            for offer in offers:
+                if needle in str(offer.get("title") or offer.get("name") or "").casefold():
+                    return ("offer", offer)
+        product = self._resolve_product(chat_id, value)
+        if product is not None:
+            return ("product", product)
+        return None
+
+    async def _async_agent(self, chat_id: int, text: str) -> bool:
+        """Let the model turn free text into one of the bot actions."""
+        if self._advisor is None or not self._advisor.available:
+            return False
+        alerts: list[dict[str, Any]] = []
+        try:
+            alerts = await self._coordinator.client.alerts()
+        except Exception:  # noqa: BLE001 - context without alerts is still usable
+            _LOGGER.debug("Could not load alerts for the agent", exc_info=True)
+        context = {
+            "products": self._last_products.get(chat_id, []),
+            "offers": [
+                {"ref": f"w{index}", **offer}
+                for index, offer in enumerate(self._last_offers.get(chat_id, []), start=1)
+            ],
+            "watchlist": [
+                {"ref": f"l{index}", **entry}
+                for index, entry in enumerate(self._watchlist_entries(chat_id), start=1)
+            ],
+            "alerts": [
+                {
+                    "ref": f"a{alert.get('alert_id')}",
+                    "alert_id": alert.get("alert_id"),
+                    "name": alert.get("name") or alert.get("product_id"),
+                    "min": alert.get("min_threshold_price"),
+                    "max": alert.get("max_threshold_price"),
+                    "drop": bool(alert.get("notify_on_drop")),
+                    "rise": bool(alert.get("notify_on_rise")),
+                    "active": bool(alert.get("is_active", True)),
+                }
+                for alert in alerts[:20]
+                if isinstance(alert, dict)
+            ],
+        }
+        plan = await self._advisor.async_plan(text, context)
+        if plan is None:
+            reason = self._advisor.last_error or "provider_error"
+            if reason == "tools_unsupported":
+                reason = "action_tools_unsupported"
+            await self._async_send(chat_id, format_action_error(reason, self._language))
+            return True
+        if not plan.calls:
+            if plan.text.strip():
+                await self._async_send(
+                    chat_id, format_chat_reply(plan.text, self._language)
+                )
+                return True
+            return False
+
+        for call in plan.calls[:3]:
+            try:
+                message = await self._execute_action(chat_id, call)
+            except Exception:  # noqa: BLE001 - one failed action must not kill the chat
+                _LOGGER.debug("Agent action failed", exc_info=True)
+                message = format_action_error("provider_error", self._language)
+            if message:
+                await self._async_send(chat_id, message)
+        return True
+
+    async def _execute_action(self, chat_id: int, call: Any) -> str | None:
+        name = str(getattr(call, "name", "") or "")
+        args = getattr(call, "arguments", {}) or {}
+        if not isinstance(args, dict):
+            args = {}
+
+        if name == "watch":
+            target = self._resolve_agent_target(chat_id, str(args.get("ref") or ""))
+            if target is None:
+                return format_ref_not_found(self._language)
+            kind, entry = target
+            if kind == "offer":
+                url = str(entry.get("url") or "")
+                if not url:
+                    return format_ref_not_found(self._language)
+                await self._async_track(chat_id, [url])
+                return None
+            product_id = entry.get("product_id")
+            if not product_id:
+                return format_ref_not_found(self._language)
+            await self._async_watch(chat_id, str(product_id))
+            return None
+
+        if name == "unwatch":
+            target = self._resolve_agent_target(chat_id, str(args.get("ref") or ""))
+            if target is None or target[0] != "product" or not target[1].get("product_id"):
+                return format_ref_not_found(self._language)
+            product_id = str(target[1]["product_id"])
+            await self._coordinator.client.unwatch(product_id)
+            await self._coordinator.async_request_refresh()
+            return format_unwatched(
+                str(target[1].get("name") or product_id), self._language
+            )
+
+        if name == "list_watchlist":
+            await self._async_watchlist(chat_id)
+            return None
+        if name == "list_alerts":
+            await self._async_alerts(chat_id)
+            return None
+
+        if name in ("price_history", "product"):
+            target = self._resolve_agent_target(chat_id, str(args.get("ref") or ""))
+            if target is None or target[0] != "product" or not target[1].get("product_id"):
+                return format_ref_not_found(self._language)
+            product_id = str(target[1]["product_id"])
+            if name == "price_history":
+                await self._async_history(chat_id, product_id)
+            else:
+                await self._async_product(chat_id, product_id)
+            return None
+
+        if name in ("create_alert", "update_alert", "delete_alert", "show_alert"):
+            changes: dict[str, Any] = {}
+            for key in ("min", "max"):
+                if args.get(key) is not None:
+                    try:
+                        changes[f"{key}_threshold_price"] = float(args[key])
+                    except (TypeError, ValueError):
+                        pass
+            for key in ("drop", "rise"):
+                if args.get(key) is not None:
+                    changes[f"notify_on_{key}"] = bool(args[key])
+            if args.get("active") is not None:
+                changes["is_active"] = bool(args["active"])
+            if args.get("name"):
+                changes["name"] = str(args["name"])
+
+            if name == "create_alert":
+                target = self._resolve_agent_target(chat_id, str(args.get("ref") or ""))
+                if target is None or target[0] != "product" or not target[1].get("product_id"):
+                    return format_ref_not_found(self._language)
+                if not changes:
+                    changes = {"notify_on_drop": True}
+                result = await self._coordinator.client.create_alert(
+                    product_id=str(target[1]["product_id"]), **changes
+                )
+                if isinstance(result, dict) and result:
+                    alert_id = result.get("alert_id") or result.get("id")
+                    if alert_id:
+                        self._last_alert_id[chat_id] = int(alert_id)
+                    return format_alert_created(result, self._language)
+                return None
+
+            alert = await self._resolve_alert(chat_id, str(args.get("alert_ref") or ""))
+            if alert is None:
+                return format_alert_not_found(
+                    args.get("alert_ref") or "?", self._language
+                )
+            alert_id = int(alert.get("alert_id") or alert.get("id"))
+            self._last_alert_id[chat_id] = alert_id
+            if name == "delete_alert":
+                await self._coordinator.client.delete_alert(alert_id)
+                return format_alert_deleted(alert_id, self._language)
+            if name == "show_alert":
+                result = await self._coordinator.client.get_alert(alert_id)
+                return format_alert_details(result, self._language)
+            if not changes:
+                return format_alert_details(alert, self._language)
+            result = await self._coordinator.client.update_alert(alert_id, **changes)
+            if isinstance(result, dict) and result:
+                return format_alert_updated(result, self._language)
+            return format_alert_updated(alert, self._language)
+
+        if name in ("best_deal", "search"):
+            query = str(args.get("query") or "").strip()
+            if not query:
+                return format_ref_not_found(self._language)
+            if name == "best_deal":
+                await self._async_deals(chat_id, query)
+            else:
+                await self._async_search(chat_id, query)
+            return None
+
+        if name == "track":
+            url = str(args.get("url") or "").strip()
+            if not url.startswith("http"):
+                return format_ref_not_found(self._language)
+            await self._async_track(chat_id, [url])
+            return None
+
+        if name == "status":
+            await self._async_status(chat_id)
+            return None
+        if name == "refresh":
+            await self._async_refresh(chat_id)
+            return None
+        if name == "help":
+            await self._async_send(chat_id, format_help(self._language))
+            return None
+        return format_action_error("unknown_action", self._language)
+
+    async def _resolve_alert(
+        self, chat_id: int, ref: str
+    ) -> dict[str, Any] | None:
+        try:
+            alerts = await self._coordinator.client.alerts()
+        except Exception:  # noqa: BLE001
+            return None
+        if not alerts:
+            return None
+        value = str(ref or "").strip().lower()
+        current = self._last_alert_id.get(chat_id)
+        if value in ("current", "last", "der", "die", "das") and current:
+            value = str(current)
+        if value.startswith("a") and value[1:].isdigit():
+            value = value[1:]
+        if value.isdigit():
+            for alert in alerts:
+                if str(alert.get("alert_id")) == value:
+                    return alert
+        if value and value not in ("current", "last", "der", "die", "das"):
+            matches = [
+                alert
+                for alert in alerts
+                if value in str(alert.get("name") or alert.get("product_id") or "").casefold()
+            ]
+            if len(matches) == 1:
+                return matches[0]
+        if len(alerts) == 1:
+            return alerts[0]
+        return None
 
     async def _async_media(self, page_url: str) -> ProductMedia | None:
         cached = self._media_cache.get(page_url)
@@ -518,6 +878,18 @@ class TelegramFrontend:
             await self._async_track(chat_id, args)
         elif command == "/watch":
             await self._async_watch(chat_id, args[0] if args else "")
+        elif command == "/unwatch":
+            await self._async_unwatch(chat_id, args[0] if args else "")
+        elif command == "/watchlist":
+            await self._async_watchlist(chat_id)
+        elif command == "/history":
+            await self._async_history(chat_id, args[0] if args else "")
+        elif command == "/product":
+            await self._async_product(chat_id, args[0] if args else "")
+        elif command == "/status":
+            await self._async_status(chat_id)
+        elif command == "/refresh":
+            await self._async_refresh(chat_id)
         elif command == "/alerts":
             await self._async_alerts(chat_id)
         elif command == "/alert":
@@ -534,6 +906,19 @@ class TelegramFrontend:
             return
         text = str(data.get("text") or "").strip()
         if text.startswith("/") or len(text) <= 2:
+            return
+        action_like = _looks_like_action(text)
+        if (
+            action_like
+            and self._advisor is not None
+            and self._advisor.available
+            and await self._async_agent(chat_id, text)
+        ):
+            return
+        if action_like and (self._advisor is None or not self._advisor.available):
+            await self._async_send(
+                chat_id, format_action_error("not_configured", self._language)
+            )
             return
         if (
             self._advisor is not None
@@ -582,6 +967,7 @@ class TelegramFrontend:
         self._last_assessments.pop(chat_id, None)
         self._last_history[chat_id] = []
         self._last_offers.pop(chat_id, None)
+        self._store_product_context(chat_id, payload.get("deals") or [])
         self._touch_memory(chat_id)
         await self._async_send_photo(chat_id, payload)
 
@@ -688,6 +1074,10 @@ class TelegramFrontend:
                 self._language,
             ),
         )
+        self._last_offers.pop(chat_id, None)
+        self._store_product_context(chat_id, results)
+        self._touch_memory(chat_id)
+        await self._async_save_memory()
 
     async def _async_track(self, chat_id: int, args: list[str]) -> None:
         language = self._language
@@ -713,6 +1103,12 @@ class TelegramFrontend:
             return
         try:
             payload = await self._coordinator.client.track(url, watch=True)
+            job_id = payload.get("job_id") if isinstance(payload, dict) else None
+            for _ in range(5):
+                if not job_id or payload.get("status") in ("completed", "failed"):
+                    break
+                await asyncio.sleep(2)
+                payload = await self._coordinator.client.job(str(job_id))
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("track failed", exc_info=True)
             await self._async_send(chat_id, self._error_text(err))
@@ -720,12 +1116,25 @@ class TelegramFrontend:
         await self._async_send(chat_id, format_track(payload, language))
         await self._coordinator.async_request_refresh()
 
-    async def _async_watch(self, chat_id: int, product_id: str) -> None:
+    async def _async_watch(self, chat_id: int, raw: str) -> None:
+        if not raw:
+            await self._async_send(
+                chat_id, format_usage("/watch", "1", self._language)
+            )
+            return
+        entry = self._resolve_product(chat_id, raw)
+        if entry is None:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        product_id = entry.get("product_id")
         if not product_id:
-            await self._async_send(chat_id, format_usage("/watch", "prod_ONgO0IjXa7YnqQ", self._language))
+            if entry.get("url"):
+                await self._async_track(chat_id, [str(entry["url"])])
+            else:
+                await self._async_send(chat_id, format_ref_not_found(self._language))
             return
         try:
-            await self._coordinator.client.watch(product_id)
+            await self._coordinator.client.watch(str(product_id))
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("watch failed", exc_info=True)
             await self._async_send(chat_id, self._error_text(err))
@@ -738,16 +1147,164 @@ class TelegramFrontend:
         await self._async_send(chat_id, message)
         await self._coordinator.async_request_refresh()
 
+    async def _async_unwatch(self, chat_id: int, raw: str) -> None:
+        entries = self._watchlist_entries(chat_id)
+        entry: dict[str, Any] | None = None
+        if raw.isdigit():
+            index = int(raw) - 1
+            if 0 <= index < len(entries):
+                entry = entries[index]
+        else:
+            needle = raw.casefold()
+            matches = [
+                item
+                for item in entries
+                if needle
+                and (
+                    needle in str(item.get("name") or "").casefold()
+                    or needle == str(item.get("product_id") or "")
+                )
+            ]
+            if len(matches) == 1:
+                entry = matches[0]
+        if entry is None:
+            await self._async_send(chat_id, format_watchlist(entries, self._language))
+            return
+        product_id = str(entry.get("product_id"))
+        try:
+            await self._coordinator.client.unwatch(product_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("unwatch failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        if chat_id in self._last_watchlist:
+            self._last_watchlist[chat_id] = [
+                item for item in self._last_watchlist[chat_id] if item != product_id
+            ]
+        await self._async_send(
+            chat_id, format_unwatched(str(entry.get("name") or product_id), self._language)
+        )
+        await self._coordinator.async_request_refresh()
+
+    async def _async_watchlist(self, chat_id: int) -> None:
+        data = getattr(self._coordinator, "data", None) or {}
+        self._last_watchlist[chat_id] = list(data)
+        await self._async_send(
+            chat_id, format_watchlist(self._watchlist_entries(chat_id), self._language)
+        )
+
+    async def _async_history(self, chat_id: int, raw: str) -> None:
+        if not raw:
+            products = self._last_products.get(chat_id, [])
+            if len(products) == 1:
+                raw = str(products[0]["ref"])
+            else:
+                await self._async_send(
+                    chat_id, format_usage("/history", "1", self._language)
+                )
+                return
+        entry = self._resolve_product(chat_id, raw)
+        if entry is None:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        product_id = entry.get("product_id")
+        if not product_id:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        try:
+            payload = await self._coordinator.client.price_history(str(product_id))
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("history failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        await self._async_send(
+            chat_id,
+            format_history(payload, str(entry.get("name") or product_id), self._language),
+        )
+
+    async def _async_product(self, chat_id: int, raw: str) -> None:
+        if not raw:
+            products = self._last_products.get(chat_id, [])
+            if len(products) == 1:
+                raw = str(products[0]["ref"])
+            else:
+                await self._async_send(
+                    chat_id, format_usage("/product", "1", self._language)
+                )
+                return
+        entry = self._resolve_product(chat_id, raw)
+        if entry is None or not entry.get("product_id"):
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        try:
+            payload = await self._coordinator.client.product(str(entry["product_id"]))
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("product failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        await self._async_send(chat_id, format_product(payload, self._language))
+
+    async def _async_status(self, chat_id: int) -> None:
+        data = getattr(self._coordinator, "data", None) or {}
+        updated = getattr(self._coordinator, "last_update_success_time", None)
+        when = updated.strftime("%d.%m.%Y %H:%M") if updated else ""
+        ai_enabled = bool(self._advisor is not None and self._advisor.available)
+        ai_today = ai_month = ""
+        if ai_enabled and self._advisor is not None:
+            try:
+                usage = await self._advisor.async_usage()
+                ai_today = f"{usage.get('spent_today', 0.0):.4f} $"
+                ai_month = f"{usage.get('spent_month', 0.0):.4f} $"
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("AI usage snapshot failed", exc_info=True)
+        api_ok = False
+        try:
+            health = await self._coordinator.client.health()
+            api_ok = health.get("status") == "ok"
+        except Exception:  # noqa: BLE001
+            pass
+        await self._async_send(
+            chat_id,
+            format_status(
+                {
+                    "watchlist": len(data),
+                    "last_update": when,
+                    "ai_enabled": ai_enabled,
+                    "ai_today": ai_today,
+                    "ai_month": ai_month,
+                    "api_ok": api_ok,
+                },
+                self._language,
+            ),
+        )
+
+    async def _async_refresh(self, chat_id: int) -> None:
+        await self._coordinator.async_request_refresh()
+        await self._async_send(chat_id, format_refreshed(self._language))
+
     async def _async_alert(self, chat_id: int, args: list[str]) -> None:
-        """Edit an existing alert: /alert 1324 min 620, pause, drop off, ..."""
+        """Edit, create, show or delete alerts."""
         usage = format_usage("/alert", "1324 min 620", self._language)
+        if not args:
+            await self._async_send(chat_id, usage)
+            return
+        head = str(args[0]).lower()
+        if head == "new":
+            await self._async_alert_new(chat_id, args[1:])
+            return
+        if head in ("delete", "del", "remove"):
+            await self._async_alert_delete(chat_id, args[1:])
+            return
+        if head in ("show", "info"):
+            await self._async_alert_show(chat_id, args[1:])
+            return
         if len(args) < 2 or not str(args[0]).isdigit():
             await self._async_send(chat_id, usage)
             return
+
         alert_id = int(args[0])
         key = str(args[1]).lower()
         changes: dict[str, Any] = {}
-
         if key in ("pause", "resume"):
             changes["is_active"] = key == "resume"
         elif key in ("active", "enable", "disable"):
@@ -780,7 +1337,6 @@ class TelegramFrontend:
                 return
             changes["name"] = name
         else:
-            # Shorthand: /alert 1324 620 -> minimum price
             try:
                 changes["min_threshold_price"] = float(key.replace(",", "."))
             except ValueError:
@@ -793,7 +1349,7 @@ class TelegramFrontend:
             _LOGGER.debug("alert update failed", exc_info=True)
             await self._async_send(chat_id, self._error_text(err))
             return
-
+        self._last_alert_id[chat_id] = alert_id
         if isinstance(result, dict) and result:
             await self._async_send(chat_id, format_alert_updated(result, self._language))
         else:
@@ -804,6 +1360,108 @@ class TelegramFrontend:
             )
             await self._async_send(chat_id, message)
 
+    async def _async_alert_new(self, chat_id: int, args: list[str]) -> None:
+        usage = format_usage("/alert new", "1 min 620", self._language)
+        if len(args) < 2:
+            await self._async_send(chat_id, usage)
+            return
+        entry = self._resolve_product(chat_id, args[0])
+        if entry is None or not entry.get("product_id"):
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        fields: dict[str, Any] = {}
+        index = 1
+        while index < len(args):
+            key = str(args[index]).lower()
+            if key in ("min", "max"):
+                if index + 1 >= len(args):
+                    await self._async_send(chat_id, usage)
+                    return
+                try:
+                    fields[f"{key}_threshold_price"] = float(
+                        str(args[index + 1]).replace(",", ".")
+                    )
+                except ValueError:
+                    await self._async_send(chat_id, usage)
+                    return
+                index += 2
+            elif key == "drop" or key == "rise":
+                value = True
+                if index + 1 < len(args) and args[index + 1].lower() in (
+                    "on", "off", "an", "aus", "true", "false",
+                ):
+                    value = args[index + 1].lower() in ("on", "an", "true")
+                    index += 2
+                else:
+                    index += 1
+                fields[f"notify_on_{key}"] = value
+            elif key == "email":
+                fields["notify_email"] = True
+                index += 1
+            elif key == "name":
+                name = " ".join(args[index + 1:]).strip()
+                if name:
+                    fields["name"] = name
+                break
+            else:
+                await self._async_send(chat_id, usage)
+                return
+        if not fields:
+            await self._async_send(chat_id, usage)
+            return
+        try:
+            result = await self._coordinator.client.create_alert(
+                product_id=str(entry["product_id"]), **fields
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("alert create failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        if isinstance(result, dict) and result:
+            alert_id = result.get("alert_id") or result.get("id")
+            if alert_id:
+                self._last_alert_id[chat_id] = int(alert_id)
+            await self._async_send(chat_id, format_alert_created(result, self._language))
+        else:
+            message = (
+                "Preisalarm angelegt."
+                if self._language == "de"
+                else "Alert created."
+            )
+            await self._async_send(chat_id, message)
+
+    async def _async_alert_show(self, chat_id: int, args: list[str]) -> None:
+        if not args or not str(args[0]).isdigit():
+            await self._async_send(
+                chat_id, format_usage("/alert show", "1324", self._language)
+            )
+            return
+        alert_id = int(args[0])
+        try:
+            result = await self._coordinator.client.get_alert(alert_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("alert show failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        self._last_alert_id[chat_id] = alert_id
+        await self._async_send(chat_id, format_alert_details(result, self._language))
+
+    async def _async_alert_delete(self, chat_id: int, args: list[str]) -> None:
+        if not args or not str(args[0]).isdigit():
+            await self._async_send(
+                chat_id, format_usage("/alert delete", "1324", self._language)
+            )
+            return
+        alert_id = int(args[0])
+        try:
+            await self._coordinator.client.delete_alert(alert_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("alert delete failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+        self._last_alert_id.pop(chat_id, None)
+        await self._async_send(chat_id, format_alert_deleted(alert_id, self._language))
+
     async def _async_alerts(self, chat_id: int) -> None:
         try:
             alerts = await self._coordinator.client.alerts()
@@ -811,6 +1469,8 @@ class TelegramFrontend:
             _LOGGER.debug("alerts failed", exc_info=True)
             await self._async_send(chat_id, self._error_text(err))
             return
+        if len(alerts) == 1 and alerts[0].get("alert_id"):
+            self._last_alert_id[chat_id] = int(alerts[0]["alert_id"])
         await self._async_send(
             chat_id,
             format_alerts({"count": len(alerts), "alerts": alerts}, self._language),
@@ -869,3 +1529,44 @@ def _looks_like_followup(text: str) -> bool:
     if lowered in ("black friday", "black week", "cyber monday"):
         return True
     return lowered.startswith(_FOLLOWUP_STARTS)
+
+
+_ACTION_WORDS = (
+    "beobachte",
+    "beobachten",
+    "beobachtest",
+    "tracke",
+    "tracken",
+    "watch",
+    "entferne",
+    "entfernen",
+    "unwatch",
+    "lösche",
+    "loesche",
+    "delete",
+    "ändere",
+    "aendere",
+    "ändern",
+    "aendern",
+    "setze",
+    "setz",
+    "aktualisiere",
+    "update",
+    "zeig",
+    "zeige",
+    "liste",
+    "watchlist",
+    "verlauf",
+    "history",
+    "alarm",
+    "alerts",
+    "preisalarm",
+    "status",
+    "refresh",
+    "anlegen",
+)
+
+
+def _looks_like_action(text: str) -> bool:
+    lowered = text.casefold()
+    return any(word in lowered for word in _ACTION_WORDS)

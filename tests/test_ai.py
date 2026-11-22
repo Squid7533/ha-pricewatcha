@@ -17,6 +17,10 @@ from custom_components.pricewatcha.ai import (
     AIResponseError,
     AIResult,
     AIUsage,
+    ACTION_TOOLS,
+    AIPlan,
+    AIToolCall,
+    AIToolsUnsupported,
     endpoint_for,
     estimate_cost,
     unknown_price,
@@ -612,3 +616,75 @@ def test_history_is_included_in_the_question_prompt():
     assert "Gesprächsverlauf" in client.user
     assert "Ist 669 gut?" in client.user
     assert "Ja, das ist der Tiefstpreis." in client.user
+
+
+def test_plan_parses_function_tool_calls():
+    body = (
+        '{"model":"deepseek-flash","choices":[{"message":{"content":null,'
+        '"tool_calls":[{"id":"c1","type":"function","function":{'
+        '"name":"watch","arguments":"{\\"ref\\":\\"w1\\"}"}}]}}],'
+        '"usage":{"prompt_tokens":300,"completion_tokens":20}}'
+    )
+    session = FakeSession(200, body)
+    client = AIClient(session, config())
+
+    plan = asyncio.run(client.async_plan("system", "user", ACTION_TOOLS))
+
+    assert plan.calls[0].name == "watch"
+    assert plan.calls[0].arguments == {"ref": "w1"}
+    call = session.calls[0]
+    assert call["json"]["tool_choice"] == "auto"
+    assert call["json"]["tools"] == ACTION_TOOLS
+
+
+def test_plan_requires_an_openai_compatible_provider():
+    client = AIClient(
+        FakeSession(200, "{}"),
+        config(provider="anthropic", base_url="https://api.anthropic.com"),
+    )
+    with pytest.raises(AIToolsUnsupported):
+        asyncio.run(client.async_plan("s", "u", ACTION_TOOLS))
+
+
+class FakePlanClient:
+    def __init__(self, plan=None, error=None):
+        self.plan = plan
+        self.error = error
+        self.calls = 0
+
+    async def async_plan(self, system, user, tools):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.plan
+
+
+def test_advisor_plan_records_cost_and_returns_calls():
+    plan = AIPlan(
+        calls=[AIToolCall("watch", {"ref": "w1"})],
+        input_tokens=300,
+        output_tokens=20,
+    )
+    usage = FakeUsage()
+    advisor = AIAdvisor(
+        None, config(), client=FakePlanClient(plan), usage=usage
+    )
+
+    result = asyncio.run(
+        advisor.async_plan("beobachte w1", {"offers": [{"ref": "w1"}]})
+    )
+
+    assert result is plan
+    assert usage.recorded > 0
+    assert advisor.last_error is None
+
+
+def test_advisor_plan_reports_missing_tool_support():
+    advisor = AIAdvisor(
+        None,
+        config(),
+        client=FakePlanClient(error=AIToolsUnsupported("no tools")),
+        usage=FakeUsage(),
+    )
+    assert asyncio.run(advisor.async_plan("beobachte w1", {})) is None
+    assert advisor.last_error == "tools_unsupported"

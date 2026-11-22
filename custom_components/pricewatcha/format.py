@@ -33,7 +33,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_ask": "/ask is 669 a good price? — ask the AI about your last deal",
         "help_search": "/search iphone 18 pro — raw catalog matches",
         "help_track": "/track <product url> — track a URL and watch it",
-        "help_watch": "/watch <product_id> — watch a catalog product",
+        "help_watch": "/watch 1 — watch a result from /deal or /search",
+        "help_unwatch": "/unwatch 1 — stop watching a product",
+        "help_watchlist": "/watchlist — watched products with numbers",
+        "help_history": "/history 1 — price history of a result",
+        "help_product": "/product 1 — details of a result",
+        "help_status": "/status — watchlist, last poll, AI spend",
+        "help_refresh": "/refresh — poll now",
         "help_alerts": "/alerts — your price alerts",
         "help_alert": "/alert 1324 min 620 — change a price alert",
         "help_reset": "/reset — forget the current conversation",
@@ -64,6 +70,33 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alerts_header": "Your price alerts:",
         "alerts_empty": "No price alerts set.",
         "alert_updated": "Alert #{id} updated",
+        "watchlist_header": "Your watchlist:",
+        "watchlist_empty": "Nothing on the watchlist yet.",
+        "history_header": "Price history: {name}",
+        "history_stats": "Low {low} · average {average} · high {high}",
+        "history_trend": "Trend: {trend}",
+        "history_empty": "No price history for this product.",
+        "product_header": "Product: {name}",
+        "product_line": "{price} · {shop} · {status}",
+        "product_checked": "Last checked: {when}",
+        "status_header": "Pricewatcha status",
+        "status_watchlist": "Watchlist: {count} products",
+        "status_last_update": "Last update: {when}",
+        "status_ai": "AI spend: {today} today · {month} this month",
+        "status_ai_off": "AI: off",
+        "status_api": "Pricewatcha API: {state}",
+        "status_ok": "reachable",
+        "status_failed": "not reachable",
+        "alert_created": "Alert #{id} created",
+        "alert_details": "Alert #{id}",
+        "unwatched": "No longer watching {name}.",
+        "refreshed": "Watchlist refreshed.",
+        "ref_not_found": "Not found in the last results. Run /deal or /search first.",
+        "ref_ambiguous": "That matches several entries; use a number from the list.",
+        "alert_deleted": "Alert #{id} deleted.",
+        "alert_not_found": "Alert #{id} not found.",
+        "action_tools_unsupported": "This AI provider cannot call tools. Use /watch, /alert, /history and the other commands instead.",
+
         "on_any_drop": "on any drop",
         "on_any_rise": "on any rise",
         "min": "min {price}",
@@ -93,7 +126,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_ask": "/ask ist 669 ein guter Preis? — die KI zum letzten Deal fragen",
         "help_search": "/search iphone 18 pro — rohe Katalogtreffer",
         "help_track": "/track <produkt-url> — URL tracken und beobachten",
-        "help_watch": "/watch <product_id> — Katalogprodukt beobachten",
+        "help_watch": "/watch 1 — Treffer aus /deal oder /search beobachten",
+        "help_unwatch": "/unwatch 1 — Beobachtung beenden",
+        "help_watchlist": "/watchlist — beobachtete Produkte mit Nummern",
+        "help_history": "/history 1 — Preisverlauf eines Treffers",
+        "help_product": "/product 1 — Details eines Treffers",
+        "help_status": "/status — Watchlist, letzter Poll, KI-Ausgaben",
+        "help_refresh": "/refresh — jetzt aktualisieren",
         "help_alerts": "/alerts — deine Preisalarme",
         "help_alert": "/alert 1324 min 620 — Preisalarm ändern",
         "help_reset": "/reset — das aktuelle Gespräch vergessen",
@@ -124,6 +163,33 @@ _STRINGS: dict[str, dict[str, str]] = {
         "alerts_header": "Deine Preisalarme:",
         "alerts_empty": "Keine Preisalarme eingerichtet.",
         "alert_updated": "Preisalarm #{id} aktualisiert",
+        "watchlist_header": "Deine Watchlist:",
+        "watchlist_empty": "Noch nichts auf der Watchlist.",
+        "history_header": "Preisverlauf: {name}",
+        "history_stats": "Tief {low} · Ø {average} · Hoch {high}",
+        "history_trend": "Trend: {trend}",
+        "history_empty": "Kein Preisverlauf für dieses Produkt.",
+        "product_header": "Produkt: {name}",
+        "product_line": "{price} · {shop} · {status}",
+        "product_checked": "Zuletzt geprüft: {when}",
+        "status_header": "Pricewatcha-Status",
+        "status_watchlist": "Watchlist: {count} Produkte",
+        "status_last_update": "Letzte Aktualisierung: {when}",
+        "status_ai": "KI-Ausgaben: {today} heute · {month} diesen Monat",
+        "status_ai_off": "KI: aus",
+        "status_api": "Pricewatcha-API: {state}",
+        "status_ok": "erreichbar",
+        "status_failed": "nicht erreichbar",
+        "alert_created": "Preisalarm #{id} angelegt",
+        "alert_details": "Preisalarm #{id}",
+        "unwatched": "{name} wird nicht mehr beobachtet.",
+        "refreshed": "Watchlist aktualisiert.",
+        "ref_not_found": "In den letzten Ergebnissen nicht gefunden. Zuerst /deal oder /search ausführen.",
+        "ref_ambiguous": "Das passt auf mehrere Einträge; bitte eine Nummer aus der Liste verwenden.",
+        "alert_deleted": "Preisalarm #{id} gelöscht.",
+        "alert_not_found": "Preisalarm #{id} nicht gefunden.",
+        "action_tools_unsupported": "Dieser KI-Anbieter kann keine Tools aufrufen. Nutze stattdessen /watch, /alert, /history und die anderen Befehle.",
+
         "on_any_drop": "bei jedem Preisrutsch",
         "on_any_rise": "bei jedem Anstieg",
         "min": "min. {price}",
@@ -299,6 +365,12 @@ def format_help(language: str = "en") -> str:
         _t(language, "help_search"),
         _t(language, "help_track"),
         _t(language, "help_watch"),
+        _t(language, "help_unwatch"),
+        _t(language, "help_watchlist"),
+        _t(language, "help_history"),
+        _t(language, "help_product"),
+        _t(language, "help_status"),
+        _t(language, "help_refresh"),
         _t(language, "help_alerts"),
         _t(language, "help_alert"),
         _t(language, "help_reset"),
@@ -540,11 +612,11 @@ def format_search(payload: dict[str, Any], language: str = "en") -> str:
             count=payload.get("count") or len(results),
         )
     ]
-    for result in results:
+    for index, result in enumerate(results, start=1):
         name = _esc(result.get("name") or result.get("product_id") or "?")
         price = _money(result.get("current_price"), result.get("currency"), language)
         shop = _esc(result.get("shop") or "?")
-        lines.append(f"{name} — {price} · {shop}")
+        lines.append(f"{index}. {name} — {price} · {shop}")
         if result.get("product_url"):
             url = result["product_url"]
             lines.append(f'<a href="{_esc_attr(url)}">{_esc(url)}</a>')
@@ -694,6 +766,9 @@ _AI_REASONS = {
         "empty": "Das Modell hat keine Antwort geliefert.",
         "unknown_price": "Die Antwort nannte einen Preis, der nicht in den Angebotsdaten steht.",
         "provider_error": "Der Anbieter hat die Anfrage abgelehnt.",
+        "tools_unsupported": "Dieser Anbieter kann keine Tools aufrufen; nutze die Befehle.",
+        "action_tools_unsupported": "Dieser Anbieter kann keine Tools aufrufen; nutze /watch, /alert, /history und die anderen Befehle.",
+        "unknown_action": "Diese Aktion habe ich nicht verstanden.",
     },
     "en": {
         "not_configured": "AI is not configured yet.",
@@ -705,6 +780,9 @@ _AI_REASONS = {
         "empty": "The model returned no answer.",
         "unknown_price": "The answer mentioned a price that is not in the offer data.",
         "provider_error": "The provider rejected the request.",
+        "tools_unsupported": "This provider cannot call tools; use the commands.",
+        "action_tools_unsupported": "This provider cannot call tools; use /watch, /alert, /history and the other commands.",
+        "unknown_action": "I did not understand that action.",
     },
 }
 
@@ -737,9 +815,7 @@ def format_reset(language: str = "en") -> str:
     return _t(language, "reset_done")
 
 
-def format_alert_updated(alert: dict[str, Any], language: str = "en") -> str:
-    """Confirmation of an edited alert, using whatever the API returned."""
-    alert_id = alert.get("alert_id") or alert.get("id") or "?"
+def _alert_body(alert: dict[str, Any], language: str) -> str:
     name = _esc(alert.get("name") or alert.get("product_id") or "?")
     parts = []
     if alert.get("notify_on_drop"):
@@ -769,8 +845,26 @@ def format_alert_updated(alert: dict[str, Any], language: str = "en") -> str:
     detail = ", ".join(parts) if parts else _t(language, "no_condition")
     if not alert.get("is_active", True):
         detail += f" {_t(language, 'paused')}"
+    return f"{name} — {detail}"
+
+
+def format_alert_updated(alert: dict[str, Any], language: str = "en") -> str:
+    """Confirmation of an edited alert, using whatever the API returned."""
+    alert_id = alert.get("alert_id") or alert.get("id") or "?"
     header = _t(language, "alert_updated", id=_esc(alert_id))
-    return f"<b>{header}</b>\n{name} — {detail}"
+    return f"<b>{header}</b>\n{_alert_body(alert, language)}"
+
+
+def format_alert_created(alert: dict[str, Any], language: str = "en") -> str:
+    alert_id = alert.get("alert_id") or alert.get("id") or "?"
+    header = _t(language, "alert_created", id=_esc(alert_id))
+    return f"<b>{header}</b>\n{_alert_body(alert, language)}"
+
+
+def format_alert_details(alert: dict[str, Any], language: str = "en") -> str:
+    alert_id = alert.get("alert_id") or alert.get("id") or "?"
+    header = _t(language, "alert_details", id=_esc(alert_id))
+    return f"<b>{header}</b>\n{_alert_body(alert, language)}"
 
 
 def format_offer_list(offers: list[dict[str, Any]], language: str = "en") -> str:
@@ -785,3 +879,142 @@ def format_offer_list(offers: list[dict[str, Any]], language: str = "en") -> str
         lines.append(f'{index}. <a href="{_esc_attr(url)}">{_esc(title)}</a>')
     lines += ["", f"<i>{_t(language, 'offers_hint')}</i>"]
     return "\n".join(lines)
+
+
+def format_watchlist(products: list[dict[str, Any]], language: str = "en") -> str:
+    if not products:
+        return _t(language, "watchlist_empty")
+    lines = [f"<b>{_t(language, 'watchlist_header')}</b>"]
+    for index, product in enumerate(products, start=1):
+        name = _esc(product.get("name") or product.get("product_id") or "?")
+        price = _money(
+            product.get("current_price", product.get("price")),
+            product.get("currency"),
+            language,
+        )
+        shop = _esc(product.get("shop") or "?")
+        lines.append(f"{index}. {name} — {price} · {shop}")
+    return "\n".join(lines)
+
+
+def format_history(
+    payload: dict[str, Any], name: str, language: str = "en"
+) -> str:
+    points = payload.get("data_points") or []
+    if not points:
+        return _t(language, "history_empty")
+    currency = payload.get("currency")
+    lines = [f"<b>{_t(language, 'history_header', name=_esc(name))}</b>"]
+    lines.append(
+        _t(
+            language,
+            "history_stats",
+            low=_money(payload.get("historical_low"), currency, language),
+            average=_money(
+                _whole(payload.get("average_price")), currency, language
+            ),
+            high=_money(payload.get("historical_high"), currency, language),
+        )
+    )
+    trend = str(payload.get("trend") or "unknown")
+    trend_labels = {
+        "downward": "fallend" if _lang(language) == "de" else "falling",
+        "upward": "steigend" if _lang(language) == "de" else "rising",
+        "stable": "stabil" if _lang(language) == "de" else "stable",
+    }
+    lines.append(
+        _t(
+            language,
+            "history_trend",
+            trend=trend_labels.get(trend, trend),
+        )
+    )
+    series = " → ".join(
+        f"{_date(point.get('date'))} {_money(point.get('price'), currency, language)}"
+        for point in points[-6:]
+        if isinstance(point, dict)
+    )
+    if series:
+        lines.append(series)
+    return "\n".join(lines)
+
+
+def format_product(product: dict[str, Any], language: str = "en") -> str:
+    name = _esc(product.get("name") or product.get("product_id") or "?")
+    lines = [f"<b>{_t(language, 'product_header', name=name)}</b>"]
+    lines.append(
+        _t(
+            language,
+            "product_line",
+            price=_money(product.get("current_price"), product.get("currency"), language),
+            shop=_esc(product.get("shop") or "?"),
+            status=_esc(product.get("status") or "?"),
+        )
+    )
+    checked = str(product.get("last_checked_at") or "").replace("T", " ")[:16]
+    if checked:
+        lines.append(_t(language, "product_checked", when=_esc(checked)))
+    if product.get("product_url"):
+        url = product["product_url"]
+        lines.append(f'<a href="{_esc_attr(url)}">{_esc(url)}</a>')
+    return "\n".join(lines)
+
+
+def format_status(data: dict[str, Any], language: str = "en") -> str:
+    lines = [f"<b>{_t(language, 'status_header')}</b>"]
+    lines.append(_t(language, "status_watchlist", count=data.get("watchlist", 0)))
+    if data.get("last_update"):
+        lines.append(
+            _t(language, "status_last_update", when=_esc(data["last_update"]))
+        )
+    if data.get("ai_enabled"):
+        lines.append(
+            _t(
+                language,
+                "status_ai",
+                today=data.get("ai_today") or "0",
+                month=data.get("ai_month") or "0",
+            )
+        )
+    else:
+        lines.append(_t(language, "status_ai_off"))
+    state = (
+        _t(language, "status_ok")
+        if data.get("api_ok")
+        else _t(language, "status_failed")
+    )
+    lines.append(_t(language, "status_api", state=state))
+    return "\n".join(lines)
+
+
+def format_unwatched(name: str, language: str = "en") -> str:
+    return _t(language, "unwatched", name=_esc(name))
+
+
+def format_refreshed(language: str = "en") -> str:
+    return _t(language, "refreshed")
+
+
+def format_ref_not_found(language: str = "en") -> str:
+    return _t(language, "ref_not_found")
+
+
+def format_ref_ambiguous(language: str = "en") -> str:
+    return _t(language, "ref_ambiguous")
+
+
+def format_alert_deleted(alert_id: Any, language: str = "en") -> str:
+    return _t(language, "alert_deleted", id=_esc(alert_id))
+
+
+def format_alert_not_found(alert_id: Any, language: str = "en") -> str:
+    return _t(language, "alert_not_found", id=_esc(alert_id))
+
+
+def format_chat_reply(text: str, language: str = "de") -> str:
+    label = "Antwort" if _lang(language) == "de" else "Answer"
+    return f"<b>{label}</b>\n{_esc(text)}"
+
+
+def format_action_error(reason: str, language: str = "de") -> str:
+    return format_ai_unavailable(reason, language)
