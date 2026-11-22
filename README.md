@@ -25,7 +25,7 @@ the account features (watchlist, price alerts) need a free
 ### HACS (custom repository)
 
 1. HACS → ⋮ → **Custom repositories**
-2. URL: `https://github.com/samuelengelking/ha-pricewatcha`, category **Integration**
+2. URL: `https://github.com/Squid7533/ha-pricewatcha`, category **Integration**
 3. Install **Pricewatcha**, then restart Home Assistant.
 
 ### Manual
