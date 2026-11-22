@@ -1,17 +1,13 @@
 {
   "domain": "pricewatcha",
   "name": "Pricewatcha",
-  "codeowners": [
-    "@Squid7533"
-  ],
+  "codeowners": ["@Squid7533"],
   "config_flow": true,
   "documentation": "https://github.com/Squid7533/ha-pricewatcha",
-  "issue_tracker": "https://github.com/Squid7533/ha-pricewatcha/issues",
-  "iot_class": "cloud_polling",
   "integration_type": "hub",
-  "loggers": [
-    "custom_components.pricewatcha"
-  ],
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Squid7533/ha-pricewatcha/issues",
+  "loggers": ["custom_components.pricewatcha"],
   "requirements": [],
   "version": "0.1.0"
 }
