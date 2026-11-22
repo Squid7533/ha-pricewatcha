@@ -50,7 +50,9 @@ class PricewatchaPriceSensor(CoordinatorEntity[PricewatchaCoordinator], SensorEn
     """Current price of one watched product."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # HA allows only None or TOTAL with device_class MONETARY; TOTAL is the
+    # one that keeps long-term statistics working for a price.
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_has_entity_name = True
     _attr_name = None  # the device (the product) carries the name
 

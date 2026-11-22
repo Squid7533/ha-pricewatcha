@@ -481,3 +481,15 @@ def test_falls_back_to_target_on_older_home_assistant():
         assert "chat_id" not in payload
 
     run(scenario())
+
+
+def test_messages_are_sent_as_plain_text():
+    """A bot entry may be configured for HTML/Markdown, where "(7.5%)" is an error."""
+
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire("telegram_command", {"chat_id": 9, "command": "/help", "args": []})
+        await asyncio.sleep(0.05)
+        assert hass.services.calls[0][2]["parse_mode"] == "plain_text"
+
+    run(scenario())

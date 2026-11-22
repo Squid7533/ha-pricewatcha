@@ -165,7 +165,13 @@ class TelegramFrontend:
             await self.hass.services.async_call(
                 TELEGRAM_DOMAIN,
                 TELEGRAM_SEND_MESSAGE,
-                {self._chat_param_name(): [int(chat_id)], "message": truncate(text)},
+                {
+                    self._chat_param_name(): [int(chat_id)],
+                    "message": truncate(text),
+                    # The bot entry may parse HTML or MarkdownV2, which rejects
+                    # plain text like "(7.5%)" or "1." — always send plain text.
+                    "parse_mode": "plain_text",
+                },
                 blocking=True,
             )
         except Exception as err:  # noqa: BLE001 - a failed reply must not kill the listener

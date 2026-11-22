@@ -194,6 +194,11 @@ the Telegram app. Typing the commands works regardless.
 **Every reply arrives twice.** Both the built-in front-end and `examples/telegram.yaml` are
 active — remove the package and restart.
 
+**Telegram replies fail with `Can't parse entities`.** The bot entry is configured for
+HTML or MarkdownV2, which rejects ordinary text such as `(7.5%)` or `1.`. The integration
+always sends `parse_mode: plain_text`, so this is fixed from 0.3.3 onwards — no change to
+your bot settings is needed. Links stay clickable because Telegram auto-links URLs.
+
 **A repair says `target` is deprecated for `telegram_bot.send_message`.** The integration
 already picks `chat_id` or `target` from the service schema at runtime, so it keeps working
 before and after HA 2026.9. If you also installed `examples/telegram.yaml`, that file now
