@@ -33,6 +33,7 @@ from .const import (
 )
 from .format import (
     format_ai_section,
+    format_alert_updated,
     format_photo_caption,
     format_ai_unavailable,
     format_alerts,
@@ -72,6 +73,7 @@ BOT_COMMANDS = [
     ("track", "Track a product URL"),
     ("watch", "Watch a product id"),
     ("alerts", "List price alerts"),
+    ("alert", "Change a price alert"),
     ("reset", "Forget the current conversation"),
     ("help", "Show commands"),
 ]
@@ -84,6 +86,7 @@ _BOT_COMMAND_LABELS = {
         "track": "Produkt-URL tracken",
         "watch": "Katalogprodukt beobachten",
         "alerts": "Preisalarme anzeigen",
+        "alert": "Preisalarm ändern",
         "reset": "Aktuelles Gespräch vergessen",
         "help": "Befehle anzeigen",
     }
@@ -503,6 +506,8 @@ class TelegramFrontend:
             await self._async_watch(chat_id, args[0] if args else "")
         elif command == "/alerts":
             await self._async_alerts(chat_id)
+        elif command == "/alert":
+            await self._async_alert(chat_id, args)
         elif command == "/reset":
             await self._async_reset(chat_id)
         else:
@@ -690,6 +695,72 @@ class TelegramFrontend:
         )
         await self._async_send(chat_id, message)
         await self._coordinator.async_request_refresh()
+
+    async def _async_alert(self, chat_id: int, args: list[str]) -> None:
+        """Edit an existing alert: /alert 1324 min 620, pause, drop off, ..."""
+        usage = format_usage("/alert", "1324 min 620", self._language)
+        if len(args) < 2 or not str(args[0]).isdigit():
+            await self._async_send(chat_id, usage)
+            return
+        alert_id = int(args[0])
+        key = str(args[1]).lower()
+        changes: dict[str, Any] = {}
+
+        if key in ("pause", "resume"):
+            changes["is_active"] = key == "resume"
+        elif key in ("active", "enable", "disable"):
+            if len(args) < 3 or args[2].lower() not in ("on", "off", "an", "aus", "true", "false"):
+                await self._async_send(chat_id, usage)
+                return
+            changes["is_active"] = args[2].lower() in ("on", "an", "true")
+        elif key in ("min", "max"):
+            if len(args) < 3:
+                await self._async_send(chat_id, usage)
+                return
+            raw = str(args[2]).lower()
+            if raw in ("off", "clear", "aus", "none", "-"):
+                changes[f"{key}_threshold_price"] = None
+            else:
+                try:
+                    changes[f"{key}_threshold_price"] = float(raw.replace(",", "."))
+                except ValueError:
+                    await self._async_send(chat_id, usage)
+                    return
+        elif key in ("drop", "rise"):
+            if len(args) < 3 or args[2].lower() not in ("on", "off", "an", "aus", "true", "false"):
+                await self._async_send(chat_id, usage)
+                return
+            changes[f"notify_on_{key}"] = args[2].lower() in ("on", "an", "true")
+        elif key == "name":
+            name = " ".join(args[2:]).strip()
+            if not name:
+                await self._async_send(chat_id, usage)
+                return
+            changes["name"] = name
+        else:
+            # Shorthand: /alert 1324 620 -> minimum price
+            try:
+                changes["min_threshold_price"] = float(key.replace(",", "."))
+            except ValueError:
+                await self._async_send(chat_id, usage)
+                return
+
+        try:
+            result = await self._coordinator.client.update_alert(alert_id, **changes)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("alert update failed", exc_info=True)
+            await self._async_send(chat_id, self._error_text(err))
+            return
+
+        if isinstance(result, dict) and result:
+            await self._async_send(chat_id, format_alert_updated(result, self._language))
+        else:
+            message = (
+                f"Preisalarm #{alert_id} aktualisiert."
+                if self._language == "de"
+                else f"Alert #{alert_id} updated."
+            )
+            await self._async_send(chat_id, message)
 
     async def _async_alerts(self, chat_id: int) -> None:
         try:

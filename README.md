@@ -20,8 +20,8 @@ the account features (watchlist, price alerts) need a free
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
 - **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts`,
-  `/reset` from your phone, plus price-drop pushes, with no YAML and no chat id to look
-  up.
+  `/alert`, `/reset` from your phone, plus price-drop pushes, with no YAML and no chat
+  id to look up.
 - **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
   plus `/ask` follow-ups with current web results and sources. Off by default; the
@@ -58,7 +58,7 @@ lives in **Configure** on the integration.
 | `pricewatcha.price_history` | Low/high/average/trend for one `product_id` |
 | `pricewatcha.track` | Submit a product URL; `watch: true` keeps it |
 | `pricewatcha.watch` / `.unwatch` | Add/remove a product from the watchlist (adds/removes its sensor) |
-| `pricewatcha.list_alerts` / `.create_alert` / `.delete_alert` | Manage Pricewatcha price alerts |
+| `pricewatcha.list_alerts` / `.create_alert` / `.update_alert` / `.delete_alert` | Manage Pricewatcha price alerts |
 | `pricewatcha.refresh` | Poll now instead of waiting for the interval |
 
 ### How `best_deal` ranks
@@ -177,8 +177,14 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/track <url>` | track a URL and watch it |
 | `/watch <product_id>` | watch a catalog product |
 | `/alerts` | your price alerts |
+| `/alert 1324 min 620` | change an existing alert: `min`/`max` (or `off`), `drop on/off`, `rise on/off`, `pause`, `resume`, `name …` |
 | `/reset` | forget the current conversation |
 | `/help` | the command list |
+
+`/alert` is the bot-side editor for alerts created elsewhere (the `create_alert` /
+`update_alert` services). The id comes from `/alerts`; only the field you name changes,
+e.g. `/alert 1324 min 620`, `/alert 1324 drop on`, `/alert 1324 pause` or
+`/alert 1324 name Black Friday`.
 
 The last `/deal` (payload, AI assessment and the last few questions) is remembered
 **per chat for 24 hours**, across Home Assistant restarts: `/ask` works without a new

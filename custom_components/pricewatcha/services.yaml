@@ -184,6 +184,59 @@ create_alert:
       selector:
         text:
 
+update_alert:
+  name: Update price alert
+  description: >-
+    Change an existing alert's thresholds, notification flags, name, email setting,
+    webhook or active state. Only the fields passed are changed.
+  fields:
+    alert_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    notify_on_drop:
+      required: false
+      selector:
+        boolean:
+    notify_on_rise:
+      required: false
+      selector:
+        boolean:
+    min_threshold_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    max_threshold_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    notify_email:
+      required: false
+      selector:
+        boolean:
+    is_active:
+      required: false
+      selector:
+        boolean:
+    name:
+      required: false
+      selector:
+        text:
+    webhook_url:
+      required: false
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
 delete_alert:
   name: Delete price alert
   description: Delete one price alert by id.

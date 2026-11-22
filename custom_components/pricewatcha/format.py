@@ -35,6 +35,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_track": "/track <product url> — track a URL and watch it",
         "help_watch": "/watch <product_id> — watch a catalog product",
         "help_alerts": "/alerts — your price alerts",
+        "help_alert": "/alert 1324 min 620 — change a price alert",
         "help_reset": "/reset — forget the current conversation",
         "help_free": "Or just type what you are looking for.",
         "reset_done": "Conversation cleared. The next /deal starts fresh.",
@@ -62,6 +63,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "search_header": 'Search "{query}" — {count} matches:',
         "alerts_header": "Your price alerts:",
         "alerts_empty": "No price alerts set.",
+        "alert_updated": "Alert #{id} updated",
         "on_any_drop": "on any drop",
         "on_any_rise": "on any rise",
         "min": "min {price}",
@@ -88,6 +90,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_track": "/track <produkt-url> — URL tracken und beobachten",
         "help_watch": "/watch <product_id> — Katalogprodukt beobachten",
         "help_alerts": "/alerts — deine Preisalarme",
+        "help_alert": "/alert 1324 min 620 — Preisalarm ändern",
         "help_reset": "/reset — das aktuelle Gespräch vergessen",
         "help_free": "Oder einfach tippen, was du suchst.",
         "reset_done": "Gespräch gelöscht. Das nächste /deal beginnt von vorn.",
@@ -115,6 +118,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "search_header": 'Suche „{query}“ — {count} Treffer:',
         "alerts_header": "Deine Preisalarme:",
         "alerts_empty": "Keine Preisalarme eingerichtet.",
+        "alert_updated": "Preisalarm #{id} aktualisiert",
         "on_any_drop": "bei jedem Preisrutsch",
         "on_any_rise": "bei jedem Anstieg",
         "min": "min. {price}",
@@ -286,6 +290,7 @@ def format_help(language: str = "en") -> str:
         _t(language, "help_track"),
         _t(language, "help_watch"),
         _t(language, "help_alerts"),
+        _t(language, "help_alert"),
         _t(language, "help_reset"),
         "",
         _t(language, "help_free"),
@@ -716,3 +721,39 @@ def format_photo_caption(
 
 def format_reset(language: str = "en") -> str:
     return _t(language, "reset_done")
+
+
+def format_alert_updated(alert: dict[str, Any], language: str = "en") -> str:
+    """Confirmation of an edited alert, using whatever the API returned."""
+    alert_id = alert.get("alert_id") or alert.get("id") or "?"
+    name = _esc(alert.get("name") or alert.get("product_id") or "?")
+    parts = []
+    if alert.get("notify_on_drop"):
+        parts.append(_t(language, "on_any_drop"))
+    if alert.get("notify_on_rise"):
+        parts.append(_t(language, "on_any_rise"))
+    if alert.get("min_threshold_price"):
+        parts.append(
+            _t(
+                language,
+                "min",
+                price=_money(
+                    alert["min_threshold_price"], alert.get("currency"), language
+                ),
+            )
+        )
+    if alert.get("max_threshold_price"):
+        parts.append(
+            _t(
+                language,
+                "max",
+                price=_money(
+                    alert["max_threshold_price"], alert.get("currency"), language
+                ),
+            )
+        )
+    detail = ", ".join(parts) if parts else _t(language, "no_condition")
+    if not alert.get("is_active", True):
+        detail += f" {_t(language, 'paused')}"
+    header = _t(language, "alert_updated", id=_esc(alert_id))
+    return f"<b>{header}</b>\n{name} — {detail}"

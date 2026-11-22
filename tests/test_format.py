@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from custom_components.pricewatcha.format import (
     format_ai_section,
+    format_alert_updated,
     format_photo_caption,
     format_ai_unavailable,
     format_alerts,
@@ -292,7 +293,16 @@ def test_to_plain_strips_tags_and_keeps_the_link_target():
 
 def test_help_lists_commands():
     text = format_help()
-    for command in ("/deal", "/ask", "/search", "/track", "/watch", "/alerts", "/reset"):
+    for command in (
+        "/deal",
+        "/ask",
+        "/search",
+        "/track",
+        "/watch",
+        "/alerts",
+        "/alert",
+        "/reset",
+    ):
         assert command in text
 
 
@@ -393,3 +403,19 @@ def test_photo_caption_uses_the_page_condition_as_fallback():
     deal["condition"] = None
     text = format_photo_caption(deal, "en", page_condition="refurbished")
     assert "refurbished" in text
+
+
+def test_alert_updated_confirmation():
+    text = format_alert_updated(
+        {
+            "alert_id": 77,
+            "name": "Deal range",
+            "currency": "EUR",
+            "min_threshold_price": 620,
+            "is_active": False,
+        },
+        "de",
+    )
+    assert "Preisalarm #77 aktualisiert" in text
+    assert "620 €" in text
+    assert "(pausiert)" in text

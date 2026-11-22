@@ -40,6 +40,7 @@ SERVICE_WATCH = "watch"
 SERVICE_UNWATCH = "unwatch"
 SERVICE_LIST_ALERTS = "list_alerts"
 SERVICE_CREATE_ALERT = "create_alert"
+SERVICE_UPDATE_ALERT = "update_alert"
 SERVICE_DELETE_ALERT = "delete_alert"
 SERVICE_REFRESH = "refresh"
 
@@ -149,6 +150,20 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as err:  # noqa: BLE001
             raise _guard(err) from err
 
+    async def handle_update_alert(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator(hass, call)
+        body = {
+            key: value
+            for key, value in call.data.items()
+            if key not in (CONF_ENTRY, ATTR_ALERT_ID)
+        }
+        try:
+            return await coordinator.client.update_alert(
+                int(call.data[ATTR_ALERT_ID]), **body
+            )
+        except Exception as err:  # noqa: BLE001
+            raise _guard(err) from err
+
     async def handle_delete_alert(call: ServiceCall) -> None:
         coordinator = _coordinator(hass, call)
         try:
@@ -251,6 +266,27 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(
         DOMAIN,
+        SERVICE_UPDATE_ALERT,
+        handle_update_alert,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_ALERT_ID): vol.Coerce(int),
+                vol.Optional("notify_on_drop"): cv.boolean,
+                vol.Optional("notify_on_rise"): cv.boolean,
+                vol.Optional("min_threshold_price"): vol.Any(None, vol.Coerce(float)),
+                vol.Optional("max_threshold_price"): vol.Any(None, vol.Coerce(float)),
+                vol.Optional("notify_email"): cv.boolean,
+                vol.Optional("is_active"): cv.boolean,
+                vol.Optional("name"): cv.string,
+                vol.Optional("webhook_url"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
         SERVICE_DELETE_ALERT,
         handle_delete_alert,
         schema=vol.Schema({vol.Optional(CONF_ENTRY): cv.string, vol.Required(ATTR_ALERT_ID): vol.Coerce(int)}),
@@ -270,6 +306,7 @@ def async_unload_services(hass: HomeAssistant) -> None:
         SERVICE_UNWATCH,
         SERVICE_LIST_ALERTS,
         SERVICE_CREATE_ALERT,
+        SERVICE_UPDATE_ALERT,
         SERVICE_DELETE_ALERT,
         SERVICE_REFRESH,
     ):

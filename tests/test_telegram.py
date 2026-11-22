@@ -130,6 +130,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.tracked: list[str] = []
         self.watched: list[str] = []
+        self.updated_alerts: list[tuple[int, dict]] = []
 
     async def search(self, query, limit=50):
         return [
@@ -155,6 +156,19 @@ class FakeClient:
 
     async def alerts(self):
         return []
+
+    async def update_alert(self, alert_id, **changes):
+        self.updated_alerts.append((alert_id, changes))
+        alert = {
+            "alert_id": alert_id,
+            "name": "Deal range",
+            "currency": "EUR",
+            "is_active": True,
+            "notify_on_drop": False,
+            "notify_on_rise": False,
+        }
+        alert.update(changes)
+        return alert
 
 
 class FakeAdvisor:
@@ -432,7 +446,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "reset", "help"]
+    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "alert", "reset", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -906,5 +920,74 @@ def test_the_configured_ttl_is_used():
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
         await asyncio.sleep(0.05)
         assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_alert_command_changes_the_minimum_price():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["1324", "min", "620"]},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (1324, {"min_threshold_price": 620.0})
+        ]
+        message = hass.services.calls[-1][2]["message"]
+        assert "Alert #1324 updated" in message
+        assert "620 €" in message
+
+    run(scenario())
+
+
+def test_alert_command_can_pause_resume_and_toggle_notifications():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "pause"]},
+        )
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "drop", "on"]},
+        )
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "name", "Black", "Friday"]},
+        )
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alert", "args": ["77", "min", "off"]},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == [
+            (77, {"is_active": False}),
+            (77, {"notify_on_drop": True}),
+            (77, {"name": "Black Friday"}),
+            (77, {"min_threshold_price": None}),
+        ]
+        assert "(paused)" in hass.services.calls[0][2]["message"]
+
+    run(scenario())
+
+
+def test_alert_command_explains_the_syntax():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/alert", "args": ["1324"]}
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.updated_alerts == []
+        assert "Nutzung" not in hass.services.calls[-1][2]["message"]
+        assert "Usage: /alert 1324 min 620" in hass.services.calls[-1][2]["message"]
 
     run(scenario())
