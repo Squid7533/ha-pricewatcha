@@ -35,7 +35,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_track": "/track <product url> — track a URL and watch it",
         "help_watch": "/watch <product_id> — watch a catalog product",
         "help_alerts": "/alerts — your price alerts",
+        "help_reset": "/reset — forget the current conversation",
         "help_free": "Or just type what you are looking for.",
+        "reset_done": "Conversation cleared. The next /deal starts fresh.",
         "nothing_matched": 'Nothing matched "{query}".',
         "matches_compared": "{matched} matches · {compared} compared",
         "compared": "{compared} compared",
@@ -86,7 +88,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_track": "/track <produkt-url> — URL tracken und beobachten",
         "help_watch": "/watch <product_id> — Katalogprodukt beobachten",
         "help_alerts": "/alerts — deine Preisalarme",
+        "help_reset": "/reset — das aktuelle Gespräch vergessen",
         "help_free": "Oder einfach tippen, was du suchst.",
+        "reset_done": "Gespräch gelöscht. Das nächste /deal beginnt von vorn.",
         "nothing_matched": 'Nichts gefunden für „{query}“.',
         "matches_compared": "{matched} Treffer · {compared} verglichen",
         "compared": "{compared} verglichen",
@@ -282,6 +286,7 @@ def format_help(language: str = "en") -> str:
         _t(language, "help_track"),
         _t(language, "help_watch"),
         _t(language, "help_alerts"),
+        _t(language, "help_reset"),
         "",
         _t(language, "help_free"),
     ]
@@ -707,3 +712,7 @@ def format_photo_caption(
     if deal.get("name"):
         lines.append(_esc(deal["name"]))
     return truncate("\n".join(lines), 900)
+
+
+def format_reset(language: str = "en") -> str:
+    return _t(language, "reset_done")

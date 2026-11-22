@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -113,16 +114,16 @@ class FakeHass:
 
 
 class FakeStore:
-    data: dict | None = None
+    values: dict[str, dict] = {}
 
     def __init__(self, hass, version: int, key: str) -> None:
         self.key = key
 
     async def async_load(self):
-        return FakeStore.data
+        return FakeStore.values.get(self.key)
 
     async def async_save(self, data):
-        FakeStore.data = data
+        FakeStore.values[self.key] = data
 
 
 class FakeClient:
@@ -171,11 +172,15 @@ class FakeAdvisor:
         self.calls: list[tuple[dict, str | None]] = []
         self.previous: list[str | None] = []
         self.web_calls: list[bool] = []
+        self.history_calls: list[list[dict[str, str]] | None] = []
 
-    async def async_advise(self, payload, question=None, previous=None, *, web=False):
+    async def async_advise(
+        self, payload, question=None, previous=None, *, web=False, history=None
+    ):
         self.calls.append((payload, question))
         self.previous.append(previous)
         self.web_calls.append(web)
+        self.history_calls.append(history)
         if self.error:
             self.last_error = self.error
             return None
@@ -191,8 +196,10 @@ class FakeCoordinator:
     def __init__(self) -> None:
         self.client = FakeClient()
         self.refreshes = 0
+        self.deal_calls = 0
 
     async def async_find_best_deals(self, query, **kwargs):
+        self.deal_calls += 1
         return {**DEALS, "query": query}
 
     async def async_request_refresh(self):
@@ -201,7 +208,7 @@ class FakeCoordinator:
 
 @pytest.fixture(autouse=True)
 def patch_store(monkeypatch):
-    FakeStore.data = None
+    FakeStore.values = {}
     monkeypatch.setattr(telegram_module, "Store", FakeStore)
     # no real HTTP session exists in these fakes; the Bot API calls are stubbed per test
     monkeypatch.setattr(telegram_module, "async_get_clientsession", lambda hass: None)
@@ -301,7 +308,7 @@ def test_first_chat_is_remembered_second_is_refused():
         hass.bus.fire("telegram_text", {"chat_id": 100, "text": "iphone"})
         await asyncio.sleep(0.05)
         assert frontend.chat_ids == [100]
-        assert FakeStore.data == {"chat_ids": [100]}
+        assert FakeStore.values[telegram_module.STORAGE_KEY] == {"chat_ids": [100]}
 
         hass.bus.fire("telegram_text", {"chat_id": 200, "text": "iphone"})
         await asyncio.sleep(0.05)
@@ -425,7 +432,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "help"]
+    assert names == ["deal", "ask", "search", "track", "watch", "alerts", "reset", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -730,5 +737,147 @@ def test_photo_is_skipped_when_the_page_has_no_image(monkeypatch):
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
         await asyncio.sleep(0.05)
         assert len(hass.services.calls) == 1
+
+    run(scenario())
+
+
+def test_free_text_after_a_deal_is_a_follow_up():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        lookups = coordinator.deal_calls
+
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "ist 669 gut?"})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.deal_calls == lookups
+        assert advisor.calls[-1][1] == "ist 669 gut?"
+        assert "<b>Antwort</b>" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_free_text_without_a_question_still_searches():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        lookups = coordinator.deal_calls
+
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "iphone 15 pro"})
+        await asyncio.sleep(0.05)
+
+        assert coordinator.deal_calls == lookups + 1
+
+    run(scenario())
+
+
+def test_memory_survives_a_restart():
+    async def scenario():
+        hass, _, frontend = await make_frontend(advisor=FakeAdvisor())
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        frontend.async_stop()
+
+        advisor = FakeAdvisor()
+        new_hass = FakeHass()
+        new_frontend = TelegramFrontend(
+            new_hass, FakeCoordinator(), 2.0, advisor=advisor, language="de"
+        )
+        await new_frontend.async_start()
+        new_hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        assert advisor.calls, "the restored deal should feed /ask"
+        assert "<b>Antwort</b>" in new_hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_reset_clears_the_conversation():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/reset", "args": []})
+        await asyncio.sleep(0.05)
+        assert "Gespräch gelöscht" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+        assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_an_expired_conversation_is_not_restored():
+    async def scenario():
+        hass, _, frontend = await make_frontend(advisor=FakeAdvisor())
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        frontend.async_stop()
+
+        stored = FakeStore.values[telegram_module.CONVERSATION_STORAGE_KEY]
+        stored["chats"]["1"]["updated_at"] = (
+            time.time() - telegram_module.CONVERSATION_TTL_SECONDS - 1
+        )
+
+        advisor = FakeAdvisor()
+        new_hass = FakeHass()
+        new_frontend = TelegramFrontend(
+            new_hass, FakeCoordinator(), 2.0, advisor=advisor, language="de"
+        )
+        await new_frontend.async_start()
+        new_hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        assert advisor.calls == []
+        assert "Starte zuerst /deal" in new_hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_question_history_is_passed_to_the_next_ask():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, _ = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "ist 669 gut?"})
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+
+        assert advisor.history_calls[1] == []
+        history = advisor.history_calls[2]
+        assert history and history[0]["q"] == "ist 669 gut?"
+        assert history[0]["a"] == "669 € ist ein guter Preis."
+
+    run(scenario())
+
+
+def test_an_expired_conversation_is_not_used_in_the_same_session():
+    advisor = FakeAdvisor()
+
+    async def scenario():
+        hass, _, frontend = await make_frontend(advisor=advisor)
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
+        await asyncio.sleep(0.05)
+        frontend._memory_updated[1] = (
+            time.time() - telegram_module.CONVERSATION_TTL_SECONDS - 1
+        )
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/ask", "args": ["gut?"]})
+        await asyncio.sleep(0.05)
+
+        assert "Starte zuerst /deal" in hass.services.calls[-1][2]["message"]
 
     run(scenario())

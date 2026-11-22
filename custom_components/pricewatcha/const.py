@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.4.4"
+VERSION: Final = "0.4.5"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -170,3 +170,11 @@ def resolved_search_provider(options: dict[str, object] | None) -> str:
     if provider == "auto":
         return "searxng" if options.get(CONF_SEARXNG_URL) else "duckduckgo"
     return provider
+
+
+# Persistent per-chat conversation memory (3d)
+CONVERSATION_STORAGE_VERSION: Final = 1
+CONVERSATION_STORAGE_KEY: Final = f"{DOMAIN}.conversations"
+CONVERSATION_TTL_SECONDS: Final = 24 * 3600
+CONVERSATION_HISTORY_MAX: Final = 4
+CONVERSATION_TEXT_MAX: Final = 600

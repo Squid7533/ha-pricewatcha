@@ -587,3 +587,28 @@ def test_a_simple_price_question_does_not_search():
     assert result is not None
     assert searcher.calls == []
     assert result.citations == []
+
+
+def test_history_is_included_in_the_question_prompt():
+    class RecordingClient(FakeClient):
+        def __init__(self):
+            super().__init__("Antwort.")
+            self.user = ""
+
+        async def async_complete(
+            self, system: str, user: str, *, web_search: bool = False
+        ) -> AIResult:
+            self.user = user
+            return await super().async_complete(system, user, web_search=web_search)
+
+    client = RecordingClient()
+    history = [{"q": "Ist 669 gut?", "a": "Ja, das ist der Tiefstpreis."}]
+    asyncio.run(
+        AIAdvisor(None, config(), client=client, usage=FakeUsage()).async_advise(
+            PAYLOAD, "Und Black Friday?", None, history=history
+        )
+    )
+
+    assert "Gesprächsverlauf" in client.user
+    assert "Ist 669 gut?" in client.user
+    assert "Ja, das ist der Tiefstpreis." in client.user

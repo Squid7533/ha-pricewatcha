@@ -9,6 +9,7 @@ and never looks up a chat id: the first chat to speak to the bot is remembered.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -21,7 +22,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .media import ProductMedia, fetch_product_media
-from .const import DOMAIN, EVENT_PRICE_CHANGED
+from .const import (
+    CONVERSATION_HISTORY_MAX,
+    CONVERSATION_STORAGE_KEY,
+    CONVERSATION_STORAGE_VERSION,
+    CONVERSATION_TEXT_MAX,
+    CONVERSATION_TTL_SECONDS,
+    DOMAIN,
+    EVENT_PRICE_CHANGED,
+)
 from .format import (
     format_ai_section,
     format_photo_caption,
@@ -30,6 +39,7 @@ from .format import (
     format_deals,
     format_help,
     format_price_drop,
+    format_reset,
     format_search,
     format_track,
     format_usage,
@@ -62,6 +72,7 @@ BOT_COMMANDS = [
     ("track", "Track a product URL"),
     ("watch", "Watch a product id"),
     ("alerts", "List price alerts"),
+    ("reset", "Forget the current conversation"),
     ("help", "Show commands"),
 ]
 
@@ -73,6 +84,7 @@ _BOT_COMMAND_LABELS = {
         "track": "Produkt-URL tracken",
         "watch": "Katalogprodukt beobachten",
         "alerts": "Preisalarme anzeigen",
+        "reset": "Aktuelles Gespräch vergessen",
         "help": "Befehle anzeigen",
     }
 }
@@ -113,6 +125,10 @@ class TelegramFrontend:
         self._media_cache: dict[str, tuple[float, ProductMedia | None]] = {}
         self._last_deals: dict[int, dict[str, Any]] = {}
         self._last_assessments: dict[int, str] = {}
+        self._last_history: dict[int, list[dict[str, str]]] = {}
+        self._memory_updated: dict[int, float] = {}
+        self._memory_lock = asyncio.Lock()
+        self._conversations: Store[dict[str, Any]] | None = None
         self._chat_ids: list[int] = []
         self._store: Store[dict[str, Any]] | None = None
         self._unsubscribers: list[Any] = []
@@ -130,6 +146,11 @@ class TelegramFrontend:
             for chat in stored.get("chat_ids", [])
             if str(chat).lstrip("-").isdigit()
         ]
+
+        self._conversations = Store(
+            self.hass, CONVERSATION_STORAGE_VERSION, CONVERSATION_STORAGE_KEY
+        )
+        await self._async_load_memory()
 
         self._unsubscribers = [
             self.hass.bus.async_listen(EVENT_TELEGRAM_COMMAND, self._on_command),
@@ -220,6 +241,78 @@ class TelegramFrontend:
                 await self._async_call(chat_id, truncate(to_plain(text)), "plain_text")
             except Exception as plain_err:  # noqa: BLE001
                 _LOGGER.warning("Telegram send failed: %s", plain_err)
+
+    async def _async_load_memory(self) -> None:
+        """Restore the last deal, assessment and Q&A for each chat."""
+        if self._conversations is None:
+            return
+        stored = await self._conversations.async_load() or {}
+        now = time.time()
+        chats = stored.get("chats") if isinstance(stored, dict) else None
+        for raw_chat, entry in (chats or {}).items():
+            if not str(raw_chat).lstrip("-").isdigit() or not isinstance(entry, dict):
+                continue
+            try:
+                updated = float(entry.get("updated_at") or 0)
+            except (TypeError, ValueError):
+                updated = 0.0
+            if now - updated > CONVERSATION_TTL_SECONDS:
+                continue
+            chat_id = int(raw_chat)
+            deal = entry.get("deal")
+            if isinstance(deal, dict):
+                self._last_deals[chat_id] = deal
+            assessment = entry.get("assessment")
+            if isinstance(assessment, str) and assessment:
+                self._last_assessments[chat_id] = assessment
+            history = entry.get("history")
+            if isinstance(history, list):
+                self._last_history[chat_id] = [
+                    item for item in history if isinstance(item, dict)
+                ][-CONVERSATION_HISTORY_MAX:]
+            self._memory_updated[chat_id] = updated
+
+    async def _async_save_memory(self) -> None:
+        if self._conversations is None:
+            return
+        async with self._memory_lock:
+            now = time.time()
+            chats: dict[str, dict[str, Any]] = {}
+            for chat_id, deal in self._last_deals.items():
+                updated = self._memory_updated.get(chat_id, now)
+                if now - updated > CONVERSATION_TTL_SECONDS:
+                    continue
+                entry: dict[str, Any] = {"updated_at": updated, "deal": deal}
+                assessment = self._last_assessments.get(chat_id)
+                if assessment:
+                    entry["assessment"] = assessment[: 2 * CONVERSATION_TEXT_MAX]
+                history = self._last_history.get(chat_id)
+                if history:
+                    entry["history"] = history[-CONVERSATION_HISTORY_MAX:]
+                chats[str(chat_id)] = entry
+            await self._conversations.async_save({"chats": chats})
+
+    def _touch_memory(self, chat_id: int) -> None:
+        self._memory_updated[chat_id] = time.time()
+
+    def _deal_for(self, chat_id: int) -> dict[str, Any] | None:
+        """The stored deal, unless it is older than the conversation TTL."""
+        updated = self._memory_updated.get(chat_id)
+        if updated is not None and time.time() - updated > CONVERSATION_TTL_SECONDS:
+            self._last_deals.pop(chat_id, None)
+            self._last_assessments.pop(chat_id, None)
+            self._last_history.pop(chat_id, None)
+            self._memory_updated.pop(chat_id, None)
+            return None
+        return self._last_deals.get(chat_id)
+
+    async def _async_reset(self, chat_id: int) -> None:
+        self._last_deals.pop(chat_id, None)
+        self._last_assessments.pop(chat_id, None)
+        self._last_history.pop(chat_id, None)
+        self._memory_updated.pop(chat_id, None)
+        await self._async_save_memory()
+        await self._async_send(chat_id, format_reset(self._language))
 
     async def _async_media(self, page_url: str) -> ProductMedia | None:
         cached = self._media_cache.get(page_url)
@@ -408,6 +501,8 @@ class TelegramFrontend:
             await self._async_watch(chat_id, args[0] if args else "")
         elif command == "/alerts":
             await self._async_alerts(chat_id)
+        elif command == "/reset":
+            await self._async_reset(chat_id)
         else:
             await self._async_send(chat_id, format_help(self._language))
 
@@ -418,6 +513,14 @@ class TelegramFrontend:
             return
         text = str(data.get("text") or "").strip()
         if text.startswith("/") or len(text) <= 2:
+            return
+        if (
+            self._advisor is not None
+            and self._advisor.available
+            and chat_id in self._last_deals
+            and _looks_like_followup(text)
+        ):
+            await self._async_ask(chat_id, text)
             return
         await self._async_deals(chat_id, text)
 
@@ -455,6 +558,9 @@ class TelegramFrontend:
         if not payload.get("deals"):
             return
         self._last_deals[chat_id] = payload
+        self._last_assessments.pop(chat_id, None)
+        self._last_history[chat_id] = []
+        self._touch_memory(chat_id)
         await self._async_send_photo(chat_id, payload)
 
         if ai_active:
@@ -468,10 +574,14 @@ class TelegramFrontend:
                 await self._async_send(
                     chat_id, format_ai_section(result, self._language)
                 )
+                self._touch_memory(chat_id)
+                await self._async_save_memory()
                 return
             verdict = format_verdict(payload, self._language)
             if verdict:
                 await self._async_send(chat_id, verdict)
+        self._touch_memory(chat_id)
+        await self._async_save_memory()
 
     async def _async_ask(self, chat_id: int, question: str) -> None:
         language = self._language
@@ -490,7 +600,7 @@ class TelegramFrontend:
             await self._async_send(chat_id, format_ai_unavailable(reason, language))
             return
 
-        payload = self._last_deals.get(chat_id)
+        payload = self._deal_for(chat_id)
         if payload is None:
             message = (
                 "Starte zuerst /deal, damit ich die Angebote kenne."
@@ -501,9 +611,14 @@ class TelegramFrontend:
             return
 
         previous = self._last_assessments.get(chat_id)
+        history = self._last_history.get(chat_id, [])
         try:
             result = await self._advisor.async_advise(
-                payload, question, previous, web=self._advisor.web_available
+                payload,
+                question,
+                previous,
+                web=self._advisor.web_available,
+                history=history,
             )
         except Exception:  # noqa: BLE001 - never leave /ask without an answer
             _LOGGER.debug("AI question failed", exc_info=True)
@@ -515,6 +630,15 @@ class TelegramFrontend:
         await self._async_send(
             chat_id, format_ai_section(result, language, answer=True)
         )
+        self._last_history[chat_id] = [
+            *history,
+            {
+                "q": question[:CONVERSATION_TEXT_MAX],
+                "a": result.text[:CONVERSATION_TEXT_MAX],
+            },
+        ][-CONVERSATION_HISTORY_MAX:]
+        self._touch_memory(chat_id)
+        await self._async_save_memory()
 
     async def _async_search(self, chat_id: int, query: str) -> None:
         if not query:
@@ -585,3 +709,48 @@ def _write_temp_file(data: bytes, suffix: str, directory: str) -> str:
     with os.fdopen(handle, "wb") as file:
         file.write(data)
     return path
+
+
+_FOLLOWUP_STARTS = (
+    "ist ",
+    "sind ",
+    "soll ",
+    "sollte ",
+    "kann ",
+    "könnte ",
+    "koennte ",
+    "wird ",
+    "würde ",
+    "wuerde ",
+    "lohnt ",
+    "was ",
+    "wie ",
+    "warum ",
+    "wieso ",
+    "gibt ",
+    "hat ",
+    "haben ",
+    "welche ",
+    "welches ",
+    "is ",
+    "are ",
+    "should ",
+    "can ",
+    "could ",
+    "will ",
+    "would ",
+    "what ",
+    "how ",
+    "why ",
+    "does ",
+)
+
+
+def _looks_like_followup(text: str) -> bool:
+    """Whether free text should be a question about the stored deal, not a new search."""
+    lowered = text.lower().strip()
+    if "?" in lowered:
+        return True
+    if lowered in ("black friday", "black week", "cyber monday"):
+        return True
+    return lowered.startswith(_FOLLOWUP_STARTS)

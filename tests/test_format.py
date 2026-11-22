@@ -292,7 +292,7 @@ def test_to_plain_strips_tags_and_keeps_the_link_target():
 
 def test_help_lists_commands():
     text = format_help()
-    for command in ("/deal", "/ask", "/search", "/track", "/watch", "/alerts"):
+    for command in ("/deal", "/ask", "/search", "/track", "/watch", "/alerts", "/reset"):
         assert command in text
 
 

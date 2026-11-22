@@ -19,8 +19,9 @@ the account features (watchlist, price alerts) need a free
 - **Services** for search, price history, tracking a URL, watch/unwatch, alerts and an
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
-- **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts` from
-  your phone, plus price-drop pushes, with no YAML and no chat id to look up.
+- **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts`,
+  `/reset` from your phone, plus price-drop pushes, with no YAML and no chat id to look
+  up.
 - **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
   plus `/ask` follow-ups with current web results and sources. Off by default; the
@@ -171,12 +172,20 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | --- | --- |
 | `/deal iphone 18 pro` | best value, condition, price history, links and a verdict |
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
-| anything without a slash | same as `/deal` |
+| anything without a slash | a question after `/deal` becomes `/ask`; otherwise same as `/deal` |
 | `/search iphone 18 pro` | raw catalog matches with prices and shops |
 | `/track <url>` | track a URL and watch it |
 | `/watch <product_id>` | watch a catalog product |
 | `/alerts` | your price alerts |
+| `/reset` | forget the current conversation |
 | `/help` | the command list |
+
+The last `/deal` (payload, AI assessment and the last few questions) is remembered
+**per chat for 24 hours**, across Home Assistant restarts: `/ask` works without a new
+search, and with AI configured a plain question after a deal is treated as a follow-up.
+`/reset` forgets it;
+a new `/deal` starts a fresh conversation. The memory lives in
+`config/.storage/pricewatcha.conversations`.
 
 A `/deal` reply looks like this (bold prices and links render in Telegram). When the
 shop exposes a product image, a photo follows the table — switch it off under
@@ -256,8 +265,10 @@ Privacy: only the product name, prices, shops, conditions and your `/ask` questi
 sent to the provider you chose — no Home Assistant states, entities or location. With
 web search on, the question also goes to DeepSeek, DuckDuckGo or your SearXNG instance.
 For the product photo, Home Assistant fetches the merchant page and uploads the image to
-Telegram. The key is stored in Home Assistant's `.storage` in plain text, as with other
-integration settings; a local model avoids the model provider, but not the search query.
+Telegram. The chat memory (last deal, assessment, questions) is stored in
+`config/.storage/pricewatcha.conversations` for 24 hours. The key is stored in Home
+Assistant's `.storage` in plain text, as with other integration settings; a local model
+avoids the model provider, but not the search query.
 
 **Price drops push on their own** once a chat is known: when a watched product falls by at
 least the threshold, the bot sends the new price, the old one and the link. The threshold
@@ -322,8 +333,7 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
   that calls `best_deal` directly is not wired up yet.
 - **A merged external-offer view** — `/ask` searches the web for every provider and
   cites sources, but `/deal` does not merge external offers into the catalog table.
-  Fetching result pages for JSON-LD prices, and persistent chat memory (3d), are in
-  [docs/phase3.md](docs/phase3.md).
+  Fetching result pages for JSON-LD prices is in [docs/phase3.md](docs/phase3.md).
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

@@ -719,6 +719,7 @@ class AIAdvisor:
         previous: str | None = None,
         *,
         web: bool = False,
+        history: list[dict[str, str]] | None = None,
     ) -> AIResult | None:
         """Return a grounded assessment, or ``None`` with ``last_error`` set.
 
@@ -755,7 +756,12 @@ class AIAdvisor:
         else:
             system = _ASK_PROMPTS[self.language]
         user = self._user_prompt(
-            payload, question, previous, web_tool=use_native, web_results=web_results
+            payload,
+            question,
+            previous,
+            web_tool=use_native,
+            web_results=web_results,
+            history=history,
         )
         estimate = estimate_cost(self.config, system, user)
 
@@ -833,6 +839,7 @@ class AIAdvisor:
         *,
         web_tool: bool = False,
         web_results: list[SearchResult] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
         compact = _compact_payload(payload)
         data = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
@@ -862,6 +869,7 @@ class AIAdvisor:
                     "\n\nDeine bisherige Einschätzung (bleibe konsistent, korrigiere "
                     f"sie nur mit gutem Grund): {previous}"
                 )
+            tail += _history_prompt(history, "de")
             return f"Heute ist der {today}.\nDaten aus dem Pricewatcha-Katalog:\n{data}{tail}"
         tail = (
             f"\n\nUser question: {question}\nAnswer the question directly."
@@ -886,6 +894,7 @@ class AIAdvisor:
                 "\n\nYour previous assessment (stay consistent, correct it only "
                 f"with a good reason): {previous}"
             )
+        tail += _history_prompt(history, "en")
         return f"Today is {today}.\nData from the Pricewatcha catalog:\n{data}{tail}"
 
     async def _async_search(
@@ -918,6 +927,24 @@ class AIAdvisor:
         results = results[:5]
         self._search_cache[key] = (time.monotonic(), results)
         return results
+
+
+def _history_prompt(history: list[dict[str, str]] | None, language: str) -> str:
+    if not history:
+        return ""
+    lines = [
+        "\n\nBisheriger Gesprächsverlauf (nur Kontext, keine neuen Fakten):"
+        if language == "de"
+        else "\n\nEarlier conversation (context only, no new facts):"
+    ]
+    for item in history[-3:]:
+        question = str(item.get("q") or "")[:400]
+        answer = str(item.get("a") or "")[:400]
+        if question:
+            lines.append(f"Q: {question}")
+        if answer:
+            lines.append(f"A: {answer}")
+    return "\n".join(lines)
 
 
 def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:

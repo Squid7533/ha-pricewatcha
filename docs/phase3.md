@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 119 tests pass.
+breaks the deterministic reply; 127 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,16 +140,27 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 119 tests pass.
+blocked shop sends no photo and no error; 127 tests pass.
 
-## 3d — conversation memory
+## 3d — conversation memory (done in 0.4.5)
 
-Persist per chat: the last product/query, the last payload and the last few
-question/answer pairs, with a TTL and a `/reset`. Free text after a deal can then be a
-follow-up instead of a new search.
+The last deal, the AI assessment and the last four question/answer pairs are stored per
+chat in `config/.storage/pricewatcha.conversations` (Store, version 1). A 24-hour TTL is
+applied on load and on save; `/reset` clears the chat, and a new `/deal` starts a fresh
+conversation.
 
-Open decisions: storage location, retention, and whether free text should become a
-follow-up (more magic) or stay a search.
+- `/ask` works after a Home Assistant restart without a new search.
+- Free text after a deal becomes a follow-up when it looks like a question (`?`, a
+  question word such as "ist/soll/kann/wird/lohnt/was", or an exact "black friday"),
+  otherwise it remains a product search.
+- The question history (last 4, 600 chars each) is passed to the model as context; the
+  previous assessment is still passed separately.
+- The store only contains the catalog payload, the assessment and the Q&A text; no API
+  keys or Home Assistant state.
+
+**Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
+it and `/ask` asks for a new `/deal`; entries older than 24 hours are ignored; free text
+"ist 669 gut?" is a follow-up while "iphone 15 pro" searches; 127 tests pass.
 
 ## Release plan
 
@@ -160,4 +171,4 @@ follow-up (more magic) or stay a search.
 | 3a.2 | 0.4.2 | `/ask` may reason about future sales; DeepSeek web search with sources |
 | 3b | 0.4.3 | provider-neutral `/ask` search: DuckDuckGo default, optional SearXNG |
 | 3c | 0.4.4 | product photos / condition |
-| 3d | 0.4.5 | persistent conversation memory |
+| 3d | 0.4.5 | persistent conversation memory (24 h, `/reset`) |
