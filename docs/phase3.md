@@ -20,11 +20,15 @@ optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
 ## 3a — advisor (done in 0.4.0)
 
 - Options menu: **General** and **AI assistant**.
-- Settings: enabled, provider, base URL, model, key, language (de/en), max tokens,
-  temperature, timeout, input/output cost per 1M tokens, daily/monthly budget.
+- Settings: enabled, provider, base URL, model, key, language (de/en, under General),
+  max tokens, temperature, timeout, input/output cost per 1M tokens, daily/monthly
+  budget.
 - DeepSeek defaults: `https://api.deepseek.com`, `deepseek-flash`, thinking disabled.
-- `/deal` sends the table first and the AI assessment as a second message.
-- `/ask <question>` answers about the last `/deal` in that chat.
+- `/deal` sends the table first and the AI assessment as a second message; with AI on,
+  the table omits the deterministic verdict so there is one judgment, not two. If the
+  model fails, the deterministic verdict follows as a short message.
+- `/ask <question>` answers about the last `/deal` in that chat and receives the
+  previous assessment so the two answers stay consistent.
 - Grounding: compact JSON of the deal payload; a price the model invents (≥ 40 €, not a
   known value or a difference of two known values) rejects the whole answer.
 - Budget: worst-case estimate checked before the call, actual cost recorded afterwards
@@ -33,7 +37,7 @@ optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 87 tests pass.
+breaks the deterministic reply; 89 tests pass.
 
 ## 3b — offers outside the catalog (next, after review)
 
@@ -74,6 +78,7 @@ follow-up (more magic) or stay a search.
 | Phase | Version | Content |
 | --- | --- | --- |
 | 3a | 0.4.0 | AI advisor, provider config, `/ask`, budgets |
-| 3b | 0.4.1 | web offers outside the catalog |
-| 3c | 0.4.2 | product photos / condition |
-| 3d | 0.4.3 | persistent conversation memory |
+| 3a.1 | 0.4.1 | one verdict (AI replaces the deterministic one), full-language replies |
+| 3b | 0.4.2 | web offers outside the catalog |
+| 3c | 0.4.3 | product photos / condition |
+| 3d | 0.4.4 | persistent conversation memory |

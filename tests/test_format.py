@@ -118,7 +118,7 @@ def test_deals_group_by_capacity_and_condition():
 def test_deals_verdict_names_the_upcharge_for_new_and_like_new():
     text = format_deals(DEALS)
     assert "<b>Verdict:</b>" in text
-    assert "Best value: 669 € (very good) at Asgoodasnew" in text
+    assert "669 € (very good) at Asgoodasnew" in text
     assert "4.3% below its own average" in text
     assert "the lowest price recorded for this variant" in text
     assert "New costs 220 € more, like new 30 € more." in text
@@ -146,7 +146,7 @@ def test_deals_without_history_still_format():
     }
     text = format_deals(payload)
     assert "1. 949.50 € · Backmarket" in text
-    assert "Best value: 949.50 € at Backmarket." in text
+    assert "<b>Verdict:</b> 949.50 € at Backmarket." in text
     assert "Price history" not in text
 
 
@@ -327,16 +327,39 @@ def test_ai_section_is_german_and_escaped():
     text = format_ai_section(result, "de")
     assert "<b>Einschätzung</b>" in text
     assert "669 € sind gut &amp; &lt;b&gt;fair&lt;/b&gt;." in text
-    assert "deepseek-flash · 0.0021 $ heute" in text
+    assert "deepseek-flash · 0,0021 $ heute" in text
 
 
 def test_ai_section_english_and_answer_label():
     result = SimpleNamespace(text="Good.", model="m", spent_today=0.01)
     text = format_ai_section(result, "en", answer=True)
     assert "<b>Answer</b>" in text
-    assert "m · $0.0100 today" in text
+    assert "m · 0.0100 $ today" in text
 
 
 def test_ai_unavailable_is_explained():
     assert "KI nicht verfügbar" in format_ai_unavailable("kein Budget", "de")
     assert "AI unavailable" in format_ai_unavailable("no budget", "en")
+
+
+def test_german_deal_message_is_fully_translated():
+    text = format_deals(DEALS, "de")
+    assert "<b>iphone air wolkenweiß</b> — 14 Treffer · 10 verglichen" in text
+    assert "<b>1. 669 € · Asgoodasnew · sehr gut</b>" in text
+    assert "4,3 % unter dem eigenen Schnitt (699 €)" in text
+    assert "niedrigster erfasster Preis" in text
+    assert "Preisverlauf: 13.10. 739 € → 18.11. 669 €" in text
+    assert "Zum Angebot" in text
+    assert "Preise nach Zustand" in text
+    assert "256 GB: sehr gut 669 € · gut 689 € · wie neu 699 € · neu 889 €" in text
+    assert "<b>Fazit:</b> 669 € (sehr gut) bei Asgoodasnew" in text
+    assert "Neu kostet 220 € mehr, wie neu 30 € mehr." in text
+    assert "Wie neu ist meist der beste Kompromiss." in text
+
+
+def test_verdict_can_be_sent_on_its_own():
+    from custom_components.pricewatcha.format import format_verdict
+
+    text = format_verdict(DEALS, "en")
+    assert text.startswith("<b>Verdict:</b> 669 €")
+    assert "New costs 220 € more" in text

@@ -28,6 +28,7 @@ from .format import (
     format_search,
     format_track,
     format_usage,
+    format_verdict,
     to_plain,
     truncate,
 )
@@ -59,6 +60,18 @@ BOT_COMMANDS = [
     ("help", "Show commands"),
 ]
 
+_BOT_COMMAND_LABELS = {
+    "de": {
+        "deal": "Bester Preis für ein Produkt",
+        "ask": "Zum letzten Deal fragen",
+        "search": "Produktkatalog durchsuchen",
+        "track": "Produkt-URL tracken",
+        "watch": "Katalogprodukt beobachten",
+        "alerts": "Preisalarme anzeigen",
+        "help": "Befehle anzeigen",
+    }
+}
+
 
 async def set_bot_commands(session, token: str, commands: list[tuple[str, str]]) -> None:
     """Publish the command list to Telegram's "/" menu (best effort)."""
@@ -81,12 +94,17 @@ class TelegramFrontend:
         coordinator: PricewatchaCoordinator,
         min_drop_pct: float,
         advisor: AIAdvisor | None = None,
+        language: str | None = None,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
         self._min_drop_pct = min_drop_pct
         self._advisor = advisor
+        # The bot language is one setting: table, verdict, help and AI text all
+        # follow it. Tests may pass an advisor alone, so fall back to its language.
+        self._language = language or (advisor.language if advisor else "en")
         self._last_deals: dict[int, dict[str, Any]] = {}
+        self._last_assessments: dict[int, str] = {}
         self._chat_ids: list[int] = []
         self._store: Store[dict[str, Any]] | None = None
         self._unsubscribers: list[Any] = []
@@ -204,8 +222,13 @@ class TelegramFrontend:
             token = entry.data.get("api_key")
             if not token:
                 continue
+            labels = _BOT_COMMAND_LABELS.get(self._language, {})
+            commands = [
+                (name, labels.get(name, description))
+                for name, description in BOT_COMMANDS
+            ]
             try:
-                await set_bot_commands(session, str(token), BOT_COMMANDS)
+                await set_bot_commands(session, str(token), commands)
                 _LOGGER.debug("Registered the Pricewatcha command menu on %s", entry.title)
             except Exception as err:  # noqa: BLE001 - cosmetic, never fatal
                 _LOGGER.debug("Could not register Telegram commands: %s", err)
@@ -251,7 +274,12 @@ class TelegramFrontend:
             _LOGGER.info("Remembered Telegram chat %s for Pricewatcha", chat_id)
             return True
 
-        await self._async_send(chat_id, "This bot is already connected to someone else's Home Assistant.")
+        message = (
+            "Dieser Bot ist bereits mit einem anderen Home Assistant verbunden."
+            if self._language == "de"
+            else "This bot is already connected to someone else's Home Assistant."
+        )
+        await self._async_send(chat_id, message)
         return False
 
     # --- event handlers --------------------------------------------------------
@@ -276,7 +304,7 @@ class TelegramFrontend:
         if drop < self._min_drop_pct:
             return
         self.hass.async_create_task(
-            self._async_broadcast(format_price_drop(dict(data)))
+            self._async_broadcast(format_price_drop(dict(data), self._language))
         )
 
     async def _async_broadcast(self, text: str) -> None:
@@ -296,7 +324,7 @@ class TelegramFrontend:
         rest = " ".join(args).strip()
 
         if command in ("/start", "/help"):
-            await self._async_send(chat_id, format_help())
+            await self._async_send(chat_id, format_help(self._language))
         elif command == "/deal":
             await self._async_deals(chat_id, rest)
         elif command == "/ask":
@@ -310,7 +338,7 @@ class TelegramFrontend:
         elif command == "/alerts":
             await self._async_alerts(chat_id)
         else:
-            await self._async_send(chat_id, format_help())
+            await self._async_send(chat_id, format_help(self._language))
 
     async def _async_handle_text(self, event: Event) -> None:
         data = event.data or {}
@@ -321,6 +349,10 @@ class TelegramFrontend:
         if text.startswith("/") or len(text) <= 2:
             return
         await self._async_deals(chat_id, text)
+
+    def _error_text(self, err: Exception) -> str:
+        prefix = "Pricewatcha-Fehler" if self._language == "de" else "Pricewatcha error"
+        return f"{prefix}: {err}"
 
     @staticmethod
     def _as_chat_id(value: Any) -> int | None:
@@ -333,36 +365,46 @@ class TelegramFrontend:
 
     async def _async_deals(self, chat_id: int, query: str) -> None:
         if not query:
-            await self._async_send(chat_id, format_usage("/deal", "iphone 18 pro"))
+            await self._async_send(chat_id, format_usage("/deal", "iphone 18 pro", self._language))
             return
         try:
             payload = await self._coordinator.async_find_best_deals(query, limit=3)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("deal lookup failed", exc_info=True)
-            await self._async_send(chat_id, f"Pricewatcha error: {err}")
+            await self._async_send(chat_id, self._error_text(err))
             return
-        await self._async_send(chat_id, format_deals(payload))
+        ai_active = self._advisor is not None and self._advisor.available
+        # With AI on, the assessment is the verdict; keeping both duplicated (and
+        # sometimes contradicted) the recommendation. If it fails, the verdict is
+        # sent as its own short message below.
+        await self._async_send(
+            chat_id,
+            format_deals(payload, self._language, include_verdict=not ai_active),
+        )
         if not payload.get("deals"):
             return
         self._last_deals[chat_id] = payload
 
-        # The table is already delivered; the assessment is a second message so a
-        # slow model never delays the facts.
-        if self._advisor is not None and self._advisor.available:
+        if ai_active:
             try:
                 result = await self._advisor.async_advise(payload)
             except Exception:  # noqa: BLE001 - the table is already delivered
                 _LOGGER.debug("AI assessment failed", exc_info=True)
                 result = None
             if result is not None:
+                self._last_assessments[chat_id] = result.text
                 await self._async_send(
-                    chat_id, format_ai_section(result, self._advisor.language)
+                    chat_id, format_ai_section(result, self._language)
                 )
+                return
+            verdict = format_verdict(payload, self._language)
+            if verdict:
+                await self._async_send(chat_id, verdict)
 
     async def _async_ask(self, chat_id: int, question: str) -> None:
-        language = self._advisor.language if self._advisor is not None else "de"
+        language = self._language
         if not question:
-            await self._async_send(chat_id, format_usage("/ask", "is 669 a good price?"))
+            await self._async_send(chat_id, format_usage("/ask", "is 669 a good price?", self._language))
             return
         if self._advisor is None or not self._advisor.available:
             reason = (
@@ -386,8 +428,9 @@ class TelegramFrontend:
             await self._async_send(chat_id, format_ai_unavailable(message, language))
             return
 
+        previous = self._last_assessments.get(chat_id)
         try:
-            result = await self._advisor.async_advise(payload, question)
+            result = await self._advisor.async_advise(payload, question, previous)
         except Exception:  # noqa: BLE001 - never leave /ask without an answer
             _LOGGER.debug("AI question failed", exc_info=True)
             result = None
@@ -401,44 +444,51 @@ class TelegramFrontend:
 
     async def _async_search(self, chat_id: int, query: str) -> None:
         if not query:
-            await self._async_send(chat_id, format_usage("/search", "iphone 18 pro"))
+            await self._async_send(chat_id, format_usage("/search", "iphone 18 pro", self._language))
             return
         try:
             results = await self._coordinator.client.search(query, limit=8)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("search failed", exc_info=True)
-            await self._async_send(chat_id, f"Pricewatcha error: {err}")
+            await self._async_send(chat_id, self._error_text(err))
             return
         await self._async_send(
-            chat_id, format_search({"query": query, "count": len(results), "results": results})
+            chat_id,
+            format_search(
+                {"query": query, "count": len(results), "results": results},
+                self._language,
+            ),
         )
 
     async def _async_track(self, chat_id: int, url: str) -> None:
         if not url.startswith("http"):
-            await self._async_send(chat_id, format_usage("/track", "https://shop.example/product"))
+            await self._async_send(chat_id, format_usage("/track", "https://shop.example/product", self._language))
             return
         try:
             payload = await self._coordinator.client.track(url, watch=True)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("track failed", exc_info=True)
-            await self._async_send(chat_id, f"Pricewatcha error: {err}")
+            await self._async_send(chat_id, self._error_text(err))
             return
-        await self._async_send(chat_id, format_track(payload))
+        await self._async_send(chat_id, format_track(payload, self._language))
         await self._coordinator.async_request_refresh()
 
     async def _async_watch(self, chat_id: int, product_id: str) -> None:
         if not product_id:
-            await self._async_send(chat_id, format_usage("/watch", "prod_ONgO0IjXa7YnqQ"))
+            await self._async_send(chat_id, format_usage("/watch", "prod_ONgO0IjXa7YnqQ", self._language))
             return
         try:
             await self._coordinator.client.watch(product_id)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("watch failed", exc_info=True)
-            await self._async_send(chat_id, f"Pricewatcha error: {err}")
+            await self._async_send(chat_id, self._error_text(err))
             return
-        await self._async_send(
-            chat_id, f"Now watching {product_id}. Its sensor appears on the next poll."
+        message = (
+            f"Beobachte jetzt {product_id}. Der Sensor erscheint beim nächsten Abruf."
+            if self._language == "de"
+            else f"Now watching {product_id}. Its sensor appears on the next poll."
         )
+        await self._async_send(chat_id, message)
         await self._coordinator.async_request_refresh()
 
     async def _async_alerts(self, chat_id: int) -> None:
@@ -446,8 +496,9 @@ class TelegramFrontend:
             alerts = await self._coordinator.client.alerts()
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("alerts failed", exc_info=True)
-            await self._async_send(chat_id, f"Pricewatcha error: {err}")
+            await self._async_send(chat_id, self._error_text(err))
             return
         await self._async_send(
-            chat_id, format_alerts({"count": len(alerts), "alerts": alerts})
+            chat_id,
+            format_alerts({"count": len(alerts), "alerts": alerts}, self._language),
         )

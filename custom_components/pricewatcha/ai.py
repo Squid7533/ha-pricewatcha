@@ -37,7 +37,6 @@ from .const import (
     CONF_AI_DAILY_BUDGET,
     CONF_AI_ENABLED,
     CONF_AI_INPUT_COST,
-    CONF_AI_LANGUAGE,
     CONF_AI_MAX_TOKENS,
     CONF_AI_MODEL,
     CONF_AI_MONTHLY_BUDGET,
@@ -57,6 +56,7 @@ from .const import (
     DEFAULT_AI_PROVIDER,
     DEFAULT_AI_TEMPERATURE,
     DEFAULT_AI_TIMEOUT,
+    language_of,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ class AIConfig:
             base_url=str(options.get(CONF_AI_BASE_URL, DEFAULT_AI_BASE_URL)).strip(),
             model=str(options.get(CONF_AI_MODEL, DEFAULT_AI_MODEL)).strip(),
             api_key=str(options.get(CONF_AI_API_KEY, "") or "").strip(),
-            language=str(options.get(CONF_AI_LANGUAGE, DEFAULT_AI_LANGUAGE)).strip().lower(),
+            language=language_of(options),
             max_tokens=_as_int(options.get(CONF_AI_MAX_TOKENS), DEFAULT_AI_MAX_TOKENS),
             temperature=_as_float(
                 options.get(CONF_AI_TEMPERATURE), DEFAULT_AI_TEMPERATURE
@@ -390,28 +390,33 @@ def estimate_cost(config: AIConfig, system: str, user: str) -> float:
 
 _SYSTEM_PROMPTS = {
     "de": (
-        "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Du bekommst "
-        "ausschließlich strukturierte Angebotsdaten aus dem Pricewatcha-Katalog. "
-        "Deine Aufgabe: in höchstens 110 Wörtern einschätzen, ob der beste Deal gut "
-        "ist und ob sich ein Aufpreis für einen besseren Zustand lohnt.\n"
+        "Du bist ein nüchterner Preisberater in einem Telegram-Bot. Der Bot zeigt "
+        "bereits eine Tabelle mit allen Preisen; deine Einschätzung ist das Fazit.\n"
+        "Aufgabe: in zwei bis drei Sätzen (höchstens 80 Wörter) sagen, ob der beste "
+        "Deal gut ist und ob sich ein Aufpreis für einen besseren Zustand lohnt. "
+        "Konzentriere dich auf die Kapazität des besten Deals; andere Kapazitäten nur, "
+        "wenn die Frage sie betrifft.\n"
         "Regeln:\n"
         "- Nutze nur Preise, Shops, Zustände und Zahlen aus den Daten. Erfinde nichts.\n"
-        "- Nenne Beträge nur, wenn sie in den Daten stehen oder sich direkt als "
-        "Differenz ergeben.\n"
-        "- Wenn eine Angabe fehlt, sage das kurz statt zu raten.\n"
+        "- Wiederhole nicht die Preistabelle; nenne höchstens zwei Beträge.\n"
+        "- Keine Spekulation über künftige Aktionen (z. B. Black Friday) oder Shops, "
+        "die nicht in den Daten stehen. Wenn die Daten eine Frage nicht beantworten, "
+        "sage das klar.\n"
         "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
         "- Antworte auf Deutsch."
     ),
     "en": (
-        "You are a level-headed price adviser in a Telegram bot. You receive only "
-        "structured offer data from the Pricewatcha catalog. Your job: in at most 110 "
-        "words, judge whether the best deal is good and whether paying more for a "
-        "better condition is worth it.\n"
+        "You are a level-headed price adviser in a Telegram bot. The bot already shows "
+        "a table with every price; your assessment is the verdict.\n"
+        "Job: in two or three sentences (at most 80 words), judge whether the best "
+        "deal is good and whether paying more for a better condition is worth it. "
+        "Focus on the capacity of the best deal; mention other capacities only when "
+        "the question is about them.\n"
         "Rules:\n"
         "- Use only prices, shops, conditions and numbers from the data. Invent nothing.\n"
-        "- Mention an amount only if it is in the data or a direct difference of two "
-        "values.\n"
-        "- If a figure is missing, say so briefly instead of guessing.\n"
+        "- Do not repeat the price table; mention at most two amounts.\n"
+        "- Do not speculate about future sales (e.g. Black Friday) or shops that are "
+        "not in the data. If the data cannot answer a question, say so clearly.\n"
         "- No tables, no markdown, no bullet points, no emojis.\n"
         "- Answer in English."
     ),
@@ -524,7 +529,10 @@ class AIAdvisor:
         return self.config.configured
 
     async def async_advise(
-        self, payload: dict[str, Any], question: str | None = None
+        self,
+        payload: dict[str, Any],
+        question: str | None = None,
+        previous: str | None = None,
     ) -> AIResult | None:
         """Return a grounded assessment, or ``None`` with ``last_error`` set."""
         self.last_error = None
@@ -533,7 +541,7 @@ class AIAdvisor:
             return None
 
         system = _SYSTEM_PROMPTS[self.language]
-        user = self._user_prompt(payload, question)
+        user = self._user_prompt(payload, question, previous)
         estimate = estimate_cost(self.config, system, user)
 
         async with self._lock:
@@ -583,7 +591,12 @@ class AIAdvisor:
             )
             return result
 
-    def _user_prompt(self, payload: dict[str, Any], question: str | None) -> str:
+    def _user_prompt(
+        self,
+        payload: dict[str, Any],
+        question: str | None,
+        previous: str | None = None,
+    ) -> str:
         compact = _compact_payload(payload)
         data = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
         if self.language == "de":
@@ -592,12 +605,22 @@ class AIAdvisor:
                 if question
                 else "\n\nSchreibe die Einschätzung."
             )
+            if previous:
+                tail += (
+                    "\n\nDeine bisherige Einschätzung (bleibe konsistent, korrigiere "
+                    f"sie nur mit gutem Grund): {previous}"
+                )
             return f"Daten aus dem Pricewatcha-Katalog:\n{data}{tail}"
         tail = (
             f"\n\nUser question: {question}\nAnswer the question directly."
             if question
             else "\n\nWrite the assessment."
         )
+        if previous:
+            tail += (
+                "\n\nYour previous assessment (stay consistent, correct it only "
+                f"with a good reason): {previous}"
+            )
         return f"Data from the Pricewatcha catalog:\n{data}{tail}"
 
 

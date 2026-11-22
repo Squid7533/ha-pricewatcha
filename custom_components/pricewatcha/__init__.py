@@ -14,6 +14,7 @@ from .const import (
     DEFAULT_TELEGRAM_MIN_DROP,
     DOMAIN,
     PLATFORMS,
+    language_of,
 )
 from .coordinator import PricewatchaCoordinator, scan_interval_of
 from .runtime import PricewatchaRuntime
@@ -38,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
         coordinator,
         float(entry.options.get(CONF_TELEGRAM_MIN_DROP, DEFAULT_TELEGRAM_MIN_DROP)),
         advisor=AIAdvisor(hass, AIConfig.from_options(entry.options)),
+        language=language_of(entry.options),
     )
     await frontend.async_start()
 

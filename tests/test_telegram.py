@@ -155,9 +155,11 @@ class FakeAdvisor:
         self.error = error
         self.last_error = None
         self.calls: list[tuple[dict, str | None]] = []
+        self.previous: list[str | None] = []
 
-    async def async_advise(self, payload, question=None):
+    async def async_advise(self, payload, question=None, previous=None):
         self.calls.append((payload, question))
+        self.previous.append(previous)
         if self.error:
             self.last_error = self.error
             return None
@@ -549,7 +551,8 @@ def test_deal_appends_an_ai_assessment_after_the_table():
         await asyncio.sleep(0.05)
 
         assert len(hass.services.calls) == 2
-        assert "compared" in hass.services.calls[0][2]["message"]
+        assert "verglichen" in hass.services.calls[0][2]["message"]
+        assert "Fazit" not in hass.services.calls[0][2]["message"]
         assessment = hass.services.calls[1][2]["message"]
         assert "<b>Einschätzung</b>" in assessment
         assert "669 € ist ein guter Preis." in assessment
@@ -576,6 +579,7 @@ def test_ask_answers_from_the_last_deal():
         payload, question = advisor.calls[1]
         assert payload["query"] == "iphone"
         assert question == "ist 669 gut?"
+        assert advisor.previous[1] == "669 € ist ein guter Preis."
         assert "<b>Antwort</b>" in hass.services.calls[-1][2]["message"]
 
     run(scenario())
@@ -602,8 +606,8 @@ def test_ask_without_ai_points_at_the_options():
         await asyncio.sleep(0.05)
 
         message = hass.services.calls[-1][2]["message"]
-        assert "KI nicht verfügbar" in message
-        assert "Konfigurieren" in message
+        assert "AI unavailable" in message
+        assert "Configure" in message
 
     run(scenario())
 
@@ -623,7 +627,7 @@ def test_ask_reports_why_the_ai_failed():
     run(scenario())
 
 
-def test_a_failed_assessment_does_not_spoil_the_deal():
+def test_a_failed_assessment_falls_back_to_the_deterministic_verdict():
     advisor = FakeAdvisor(error="timeout")
 
     async def scenario():
@@ -631,7 +635,8 @@ def test_a_failed_assessment_does_not_spoil_the_deal():
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
         await asyncio.sleep(0.05)
 
-        assert len(hass.services.calls) == 1
-        assert "compared" in hass.services.calls[0][2]["message"]
+        assert len(hass.services.calls) == 2
+        assert "Fazit" not in hass.services.calls[0][2]["message"]
+        assert "<b>Fazit:</b>" in hass.services.calls[1][2]["message"]
 
     run(scenario())

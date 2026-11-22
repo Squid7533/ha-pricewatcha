@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.4.0"
+VERSION: Final = "0.4.1"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -98,7 +98,8 @@ CONF_AI_PROVIDER = "ai_provider"
 CONF_AI_BASE_URL = "ai_base_url"
 CONF_AI_MODEL = "ai_model"
 CONF_AI_API_KEY = "ai_api_key"
-CONF_AI_LANGUAGE = "ai_language"
+CONF_AI_LANGUAGE = "ai_language"  # legacy key, still read as a fallback
+CONF_LANGUAGE = "language"
 CONF_AI_MAX_TOKENS = "ai_max_tokens"
 CONF_AI_TEMPERATURE = "ai_temperature"
 CONF_AI_TIMEOUT = "ai_timeout"
@@ -117,7 +118,8 @@ DEFAULT_AI_PROVIDER: Final = AI_PROVIDER_OPENAI
 # name is stable; every other provider is just a different base_url/model.
 DEFAULT_AI_BASE_URL: Final = "https://api.deepseek.com"
 DEFAULT_AI_MODEL: Final = "deepseek-flash"
-DEFAULT_AI_LANGUAGE: Final = "de"
+DEFAULT_AI_LANGUAGE: Final = "en"
+DEFAULT_LANGUAGE: Final = "en"
 DEFAULT_AI_MAX_TOKENS: Final = 700
 DEFAULT_AI_TEMPERATURE: Final = 0.3
 DEFAULT_AI_TIMEOUT: Final = 30
@@ -131,3 +133,14 @@ DEFAULT_AI_MONTHLY_BUDGET: Final = 10.0
 
 AI_USAGE_STORAGE_VERSION: Final = 1
 AI_USAGE_STORAGE_KEY: Final = f"{DOMAIN}.ai_usage"
+
+
+def language_of(options: dict[str, object] | None) -> str:
+    """The bot language, falling back to the 0.4.0 ``ai_language`` key."""
+    options = options or {}
+    value = str(
+        options.get(CONF_LANGUAGE)
+        or options.get(CONF_AI_LANGUAGE)
+        or DEFAULT_LANGUAGE
+    ).lower()
+    return value if value in ("de", "en") else DEFAULT_LANGUAGE

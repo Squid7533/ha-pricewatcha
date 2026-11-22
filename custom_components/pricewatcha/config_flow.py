@@ -19,7 +19,6 @@ from .const import (
     CONF_AI_DAILY_BUDGET,
     CONF_AI_ENABLED,
     CONF_AI_INPUT_COST,
-    CONF_AI_LANGUAGE,
     CONF_AI_MAX_TOKENS,
     CONF_AI_MODEL,
     CONF_AI_MONTHLY_BUDGET,
@@ -28,13 +27,13 @@ from .const import (
     CONF_AI_TEMPERATURE,
     CONF_AI_TIMEOUT,
     CONF_API_KEY,
+    CONF_LANGUAGE,
     CONF_SCAN_INTERVAL,
     CONF_TELEGRAM_MIN_DROP,
     DEFAULT_AI_BASE_URL,
     DEFAULT_AI_DAILY_BUDGET,
     DEFAULT_AI_ENABLED,
     DEFAULT_AI_INPUT_COST,
-    DEFAULT_AI_LANGUAGE,
     DEFAULT_AI_MAX_TOKENS,
     DEFAULT_AI_MODEL,
     DEFAULT_AI_MONTHLY_BUDGET,
@@ -45,6 +44,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TELEGRAM_MIN_DROP,
     DOMAIN,
+    language_of,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
 )
@@ -155,6 +155,18 @@ class PricewatchaOptionsFlow(OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(
+                        CONF_LANGUAGE,
+                        default=language_of(self.config_entry.options),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {"value": "en", "label": "English"},
+                                {"value": "de", "label": "Deutsch"},
+                            ],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
                         CONF_SCAN_INTERVAL,
                         default=self.config_entry.options.get(
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -244,18 +256,6 @@ class PricewatchaOptionsFlow(OptionsFlow):
                         CONF_AI_API_KEY,
                         default=current.get(CONF_AI_API_KEY, ""),
                     ): API_KEY_SELECTOR,
-                    vol.Optional(
-                        CONF_AI_LANGUAGE,
-                        default=current.get(CONF_AI_LANGUAGE, DEFAULT_AI_LANGUAGE),
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                {"value": "de", "label": "Deutsch"},
-                                {"value": "en", "label": "English"},
-                            ],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
                     vol.Optional(
                         CONF_AI_MAX_TOKENS,
                         default=current.get(CONF_AI_MAX_TOKENS, DEFAULT_AI_MAX_TOKENS),

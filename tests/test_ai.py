@@ -126,6 +126,7 @@ def config(**overrides) -> AIConfig:
         base_url="https://api.deepseek.com",
         model="deepseek-flash",
         api_key="sk-test",
+        language="de",
         input_cost_per_mtok=0.15,
         output_cost_per_mtok=0.60,
     )
@@ -139,7 +140,7 @@ def test_defaults_are_off_and_point_at_deepseek():
     assert cfg.enabled is False
     assert cfg.base_url == "https://api.deepseek.com"
     assert cfg.model == "deepseek-flash"
-    assert cfg.language == "de"
+    assert cfg.language == "en"
     assert cfg.daily_budget_usd == 1.0
     assert cfg.monthly_budget_usd == 10.0
 

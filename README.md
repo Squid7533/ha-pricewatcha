@@ -193,21 +193,26 @@ Prices by condition
 256 GB: very good 669 € · good 689 € · like new 699 € · new 889 €
 512 GB: very good 769 € · like new 819 € · new 1 019 €
 
-Verdict: Best value: 669 € (very good) at Asgoodasnew, 4.3% below its own average,
-the lowest price recorded for this variant. New costs 220 € more, like new 30 € more.
-Like new is usually the best compromise.
+Verdict: 669 € (very good) at Asgoodasnew, 4.3% below its own average, the lowest price
+recorded for this variant. New costs 220 € more, like new 30 € more. Like new is usually
+the best compromise.
 ```
 
 The condition is read from the product name or, where the merchant only encodes it
 there, from the URL slug; an offer with no stated condition is shown as `unrated`
 instead of being guessed as new.
 
+The language is set under **Configure → General** and applies to the whole reply — the
+table, the verdict, help and the AI paragraph. English is the default; German is a
+dropdown choice.
+
 ### AI assessment (optional)
 
 The advisor is presentation only: it receives the same structured deal data the table
-is built from and writes a short assessment. The table is always sent; if the model
-fails, times out, runs out of budget or invents a price that is not in the data, only
-the AI paragraph is dropped.
+is built from and writes the verdict. With AI enabled the table leaves the deterministic
+`Verdict` line out, so there is one judgment instead of two; if the model fails, times
+out, runs out of budget or invents a price that is not in the data, the deterministic
+verdict is sent as its own short message instead.
 
 Configure it under **Settings → Devices & services → Pricewatcha → Configure → AI
 assistant**:
@@ -218,13 +223,13 @@ assistant**:
 | Base URL | DeepSeek `https://api.deepseek.com`, OpenAI `https://api.openai.com/v1`, Anthropic `https://api.anthropic.com`, Ollama `http://192.168.1.10:11434/v1` |
 | Model | Free text. DeepSeek preset is `deepseek-flash`; Ollama e.g. `llama3.1` |
 | API key | Your own key; leave empty for a local server |
-| Answer language | German or English |
+| Language | Set under **General**; applies to the table and the AI text |
 | Budgets | USD per day and per month, checked before every call; `0` means no limit |
 
 DeepSeek is the default preset because it is cheap and OpenAI-compatible. For
 `deepseek-flash` the integration disables thinking mode (a short assessment does not
 need it) and reports the spend in the footer of each AI message, e.g.
-`deepseek-flash · 0.0006 $ heute`. A typical answer costs a fraction of a cent.
+`deepseek-flash · 0,0006 $ heute`. A typical answer costs a fraction of a cent.
 
 For a self-hosted model, remember that `localhost` inside the Home Assistant container
 is not your workstation: use the host's LAN address, or the add-on's internal URL when

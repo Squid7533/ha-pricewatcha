@@ -39,20 +39,20 @@
       "general": {
         "title": "General",
         "data": {
+          "language": "Language",
           "scan_interval": "Poll interval (minutes)",
           "telegram_min_drop_pct": "Minimum drop to notify (%)"
         }
       },
       "ai": {
         "title": "AI assistant",
-        "description": "Optional. The AI writes a short assessment below `/deal` and answers `/ask`. It only sees the prices from Pricewatcha, and the deterministic table is always sent too.\n\nExamples: DeepSeek `https://api.deepseek.com` with `deepseek-flash`; OpenAI `https://api.openai.com/v1` with your model; Ollama on your network `http://192.168.1.10:11434/v1` with `llama3.1` and an empty key.\n\nThe key is stored in Home Assistant's `.storage` in plain text, like other integration settings. A budget of 0 means no limit.",
+        "description": "Optional. The AI writes a short assessment below `/deal` and answers `/ask`. It only sees the prices from Pricewatcha, and the deterministic table is always sent too.\n\nExamples: DeepSeek `https://api.deepseek.com` with `deepseek-flash`; OpenAI `https://api.openai.com/v1` with your model; Ollama on your network `http://192.168.1.10:11434/v1` with `llama3.1` and an empty key.\n\nThe key is stored in Home Assistant's `.storage` in plain text, like other integration settings. A budget of 0 means no limit. The language is set under General and applies to the table and the AI text.",
         "data": {
           "ai_enabled": "Enable AI assessment",
           "ai_provider": "Provider",
           "ai_base_url": "Base URL",
           "ai_model": "Model",
           "ai_api_key": "API key (optional for local servers)",
-          "ai_language": "Answer language",
           "ai_max_tokens": "Maximum answer tokens",
           "ai_temperature": "Temperature",
           "ai_timeout": "Request timeout",

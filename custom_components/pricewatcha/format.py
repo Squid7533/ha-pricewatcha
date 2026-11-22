@@ -7,6 +7,9 @@ Messages are HTML: Telegram then renders bold prices and tappable "See offer" li
 instead of a wall of raw URLs. HTML has its own footgun — an unescaped ``&`` or
 ``<`` in a product name is a parse error — so every dynamic value goes through
 :func:`_esc`, and :func:`truncate` closes the tags it cuts through.
+
+Every user-facing message takes a ``language`` (``en``/``de``); the deterministic
+table and the AI paragraph therefore speak the same language.
 """
 
 from __future__ import annotations
@@ -21,6 +24,140 @@ _CURRENCY_SYMBOLS = {"EUR": "€", "USD": "$", "GBP": "£"}
 _TAG_RE = re.compile(r"<(/?)([a-zA-Z][\w-]*)[^>]*>")
 _LINK_RE = re.compile(r'<a href="([^"]*)">(.*?)</a>', re.DOTALL)
 _STRIP_TAG_RE = re.compile(r"</?[a-zA-Z][\w-]*[^>]*>")
+
+
+_STRINGS: dict[str, dict[str, str]] = {
+    "en": {
+        "help_header": "Pricewatcha commands:",
+        "help_deal": "/deal iphone 18 pro — best value, ranked against each product's own price history",
+        "help_ask": "/ask is 669 a good price? — ask the AI about your last deal",
+        "help_search": "/search iphone 18 pro — raw catalog matches",
+        "help_track": "/track <product url> — track a URL and watch it",
+        "help_watch": "/watch <product_id> — watch a catalog product",
+        "help_alerts": "/alerts — your price alerts",
+        "help_free": "Or just type what you are looking for.",
+        "nothing_matched": 'Nothing matched "{query}".',
+        "matches_compared": "{matched} matches · {compared} compared",
+        "compared": "{compared} compared",
+        "see_offer": "See offer",
+        "price_history": "Price history",
+        "prices_by_condition": "Prices by condition",
+        "verdict": "Verdict",
+        "below_average": "{pct} below its own average ({average})",
+        "above_average": "{pct} above its own average ({average})",
+        "below_average_short": "{pct} below its own average",
+        "above_average_short": "{pct} above its own average",
+        "lowest_recorded": "lowest recorded price",
+        "lowest_variant": "the lowest price recorded for this variant",
+        "low_was": "low was {price}",
+        "price_falling": "price falling",
+        "new_costs_more": "New costs {amount} more",
+        "like_new_costs_more": "Like new costs {amount} more",
+        "like_new_short": "like new {amount} more",
+        "like_new_compromise": "Like new is usually the best compromise.",
+        "unrated": "unrated",
+        "footer": "Prices from the Pricewatcha catalog; the shop page is authoritative.",
+        "search_header": 'Search "{query}" — {count} matches:',
+        "alerts_header": "Your price alerts:",
+        "alerts_empty": "No price alerts set.",
+        "on_any_drop": "on any drop",
+        "on_any_rise": "on any rise",
+        "min": "min {price}",
+        "max": "max {price}",
+        "no_condition": "no condition",
+        "paused": "(paused)",
+        "tracking_submitted": "Tracking submitted: {status}",
+        "tracking_failed": "Tracking failed: {code} — {message}",
+        "tracking_running": "Job {job} is still running; the price appears on the next poll.",
+        "price_drop": "Price drop: {name}",
+        "was": "was {price}",
+        "at": "at {shop}",
+        "usage": "Usage: {command} {example}",
+        "ai_label": "AI take",
+        "ai_answer": "Answer",
+        "ai_unavailable": "AI unavailable",
+        "today": "today",
+    },
+    "de": {
+        "help_header": "Pricewatcha-Befehle:",
+        "help_deal": "/deal iphone 18 pro — bester Preis, am eigenen Preisverlauf gemessen",
+        "help_ask": "/ask ist 669 ein guter Preis? — die KI zum letzten Deal fragen",
+        "help_search": "/search iphone 18 pro — rohe Katalogtreffer",
+        "help_track": "/track <produkt-url> — URL tracken und beobachten",
+        "help_watch": "/watch <product_id> — Katalogprodukt beobachten",
+        "help_alerts": "/alerts — deine Preisalarme",
+        "help_free": "Oder einfach tippen, was du suchst.",
+        "nothing_matched": 'Nichts gefunden für „{query}“.',
+        "matches_compared": "{matched} Treffer · {compared} verglichen",
+        "compared": "{compared} verglichen",
+        "see_offer": "Zum Angebot",
+        "price_history": "Preisverlauf",
+        "prices_by_condition": "Preise nach Zustand",
+        "verdict": "Fazit",
+        "below_average": "{pct} unter dem eigenen Schnitt ({average})",
+        "above_average": "{pct} über dem eigenen Schnitt ({average})",
+        "below_average_short": "{pct} unter dem eigenen Schnitt",
+        "above_average_short": "{pct} über dem eigenen Schnitt",
+        "lowest_recorded": "niedrigster erfasster Preis",
+        "lowest_variant": "der niedrigste erfasste Preis für diese Variante",
+        "low_was": "Tief war {price}",
+        "price_falling": "Preis fallend",
+        "new_costs_more": "Neu kostet {amount} mehr",
+        "like_new_costs_more": "Wie neu kostet {amount} mehr",
+        "like_new_short": "wie neu {amount} mehr",
+        "like_new_compromise": "Wie neu ist meist der beste Kompromiss.",
+        "unrated": "ohne Zustand",
+        "footer": "Preise aus dem Pricewatcha-Katalog; maßgeblich ist die Händlerseite.",
+        "search_header": 'Suche „{query}“ — {count} Treffer:',
+        "alerts_header": "Deine Preisalarme:",
+        "alerts_empty": "Keine Preisalarme eingerichtet.",
+        "on_any_drop": "bei jedem Preisrutsch",
+        "on_any_rise": "bei jedem Anstieg",
+        "min": "min. {price}",
+        "max": "max. {price}",
+        "no_condition": "keine Bedingung",
+        "paused": "(pausiert)",
+        "tracking_submitted": "Tracking gestartet: {status}",
+        "tracking_failed": "Tracking fehlgeschlagen: {code} — {message}",
+        "tracking_running": "Job {job} läuft noch; der Preis erscheint beim nächsten Abruf.",
+        "price_drop": "Preisrutsch: {name}",
+        "was": "war {price}",
+        "at": "bei {shop}",
+        "usage": "Nutzung: {command} {example}",
+        "ai_label": "Einschätzung",
+        "ai_answer": "Antwort",
+        "ai_unavailable": "KI nicht verfügbar",
+        "today": "heute",
+    },
+}
+
+_CONDITIONS: dict[str, dict[str, str]] = {
+    "very good": {"en": "very good", "de": "sehr gut"},
+    "like new": {"en": "like new", "de": "wie neu"},
+    "good": {"en": "good", "de": "gut"},
+    "new": {"en": "new", "de": "neu"},
+    "grade A": {"en": "grade A", "de": "Zustand A"},
+    "grade B": {"en": "grade B", "de": "Zustand B"},
+    "grade C": {"en": "grade C", "de": "Zustand C"},
+    "refurbished": {"en": "refurbished", "de": "generalüberholt"},
+    "used": {"en": "used", "de": "gebraucht"},
+}
+
+
+def _lang(language: str | None) -> str:
+    return language if language in _STRINGS else "en"
+
+
+def _t(language: str | None, key: str, **values: Any) -> str:
+    text = _STRINGS[_lang(language)][key]
+    return text.format(**values) if values else text
+
+
+def _condition(value: Any, language: str | None) -> str:
+    label = str(value or "")
+    if not label:
+        return _t(language, "unrated")
+    return _CONDITIONS.get(label, {}).get(_lang(language), label)
 
 
 def _esc(value: Any) -> str:
@@ -87,8 +224,8 @@ def to_plain(text: str) -> str:
     return html.unescape(text)
 
 
-def _money(value: Any, currency: str | None) -> str:
-    """A price a human reads at a glance: ``669 €``, ``1 019 €``, ``949.50 €``."""
+def _money(value: Any, currency: str | None, language: str | None = "en") -> str:
+    """A price a human reads at a glance: ``669 €``, ``1 019 €``, ``949,50 €``."""
     if value is None:
         return "?"
     try:
@@ -100,6 +237,8 @@ def _money(value: Any, currency: str | None) -> str:
     else:
         shown = f"{number:,.2f}"
     shown = shown.replace(",", " ")
+    if _lang(language) == "de" and "." in shown:
+        shown = shown.replace(".", ",")
     symbol = _CURRENCY_SYMBOLS.get((currency or "").upper())
     if symbol:
         return f"{shown} {symbol}"
@@ -121,32 +260,41 @@ def _date(value: Any) -> str:
     return _esc(value)
 
 
-def _percent(value: Any) -> str:
+def _percent(value: Any, language: str | None = "en") -> str:
     try:
         number = float(value)
     except (TypeError, ValueError):
         return _esc(value)
-    return f"{number:.1f}".rstrip("0").rstrip(".") + "%"
+    shown = f"{number:.1f}".rstrip("0").rstrip(".")
+    if _lang(language) == "de":
+        return shown.replace(".", ",") + " %"
+    return shown + "%"
 
 
-def format_help() -> str:
-    return (
-        "Pricewatcha commands:\n\n"
-        "/deal iphone 18 pro — best value, ranked against each product's own price history\n"
-        "/ask is 669 a good price? — ask the AI about your last deal\n"
-        "/search iphone 18 pro — raw catalog matches\n"
-        "/track <product url> — track a URL and watch it\n"
-        "/watch <product_id> — watch a catalog product\n"
-        "/alerts — your price alerts\n\n"
-        "Or just type what you are looking for."
-    )
+def format_help(language: str = "en") -> str:
+    lines = [
+        _t(language, "help_header"),
+        "",
+        _t(language, "help_deal"),
+        _t(language, "help_ask"),
+        _t(language, "help_search"),
+        _t(language, "help_track"),
+        _t(language, "help_watch"),
+        _t(language, "help_alerts"),
+        "",
+        _t(language, "help_free"),
+    ]
+    return "\n".join(lines)
 
 
-def _deal_lines(index: int, deal: dict[str, Any]) -> list[str]:
+def _deal_lines(index: int, deal: dict[str, Any], language: str) -> list[str]:
     currency = deal.get("currency")
-    title = f"{index}. {_money(deal.get('price'), currency)} · {_esc(deal.get('shop') or '?')}"
+    title = (
+        f"{index}. {_money(deal.get('price'), currency, language)} · "
+        f"{_esc(deal.get('shop') or '?')}"
+    )
     if deal.get("condition"):
-        title += f" · {_esc(deal['condition'])}"
+        title += f" · {_esc(_condition(deal['condition'], language))}"
     lines = [f"<b>{title}</b>"]
     if deal.get("name"):
         lines.append(_esc(deal["name"]))
@@ -155,63 +303,63 @@ def _deal_lines(index: int, deal: dict[str, Any]) -> list[str]:
     discount = deal.get("vs_average_pct")
     if discount is not None:
         average = deal.get("average_price")
-        direction = "below" if float(discount) >= 0 else "above"
+        key = "below_average" if float(discount) >= 0 else "above_average"
         meta.append(
-            f"{_percent(abs(float(discount)))} {direction} its own average "
-            f"({_money(_whole(average), currency)})"
+            _t(
+                language,
+                key,
+                pct=_percent(abs(float(discount)), language),
+                average=_money(_whole(average), currency, language),
+            )
         )
     low = deal.get("historical_low")
     if low is not None:
         if deal.get("vs_low_pct") is not None and float(deal["vs_low_pct"]) >= 0:
-            meta.append("lowest recorded price")
+            meta.append(_t(language, "lowest_recorded"))
         else:
-            meta.append(f"low was {_money(low, currency)}")
+            meta.append(_t(language, "low_was", price=_money(low, currency, language)))
     if deal.get("trend") == "downward":
-        meta.append("price falling")
+        meta.append(_t(language, "price_falling"))
     if meta:
         lines.append(" · ".join(meta))
 
     history = deal.get("history") or []
     if index == 1 and history:
         points = " → ".join(
-            f"{_date(point.get('date'))} {_money(point.get('price'), currency)}"
+            f"{_date(point.get('date'))} {_money(point.get('price'), currency, language)}"
             for point in history
         )
-        lines.append(f"Price history: {points}")
+        lines.append(f"{_t(language, 'price_history')}: {points}")
 
     if deal.get("url"):
-        lines.append(f'<a href="{_esc_attr(deal["url"])}">See offer</a>')
+        lines.append(
+            f'<a href="{_esc_attr(deal["url"])}">{_t(language, "see_offer")}</a>'
+        )
     return lines
 
 
-def _group_lines(groups: list[dict[str, Any]]) -> list[str]:
+def _group_lines(groups: list[dict[str, Any]], language: str) -> list[str]:
     lines: list[str] = []
     for group in groups:
         offers = group.get("offers") or []
         if not offers:
             continue
         parts = [
-            f"{_esc(offer.get('condition') or 'unrated')} "
-            f"{_money(offer.get('price'), offer.get('currency'))}"
+            f"{_esc(_condition(offer.get('condition'), language))} "
+            f"{_money(offer.get('price'), offer.get('currency'), language)}"
             for offer in offers
         ]
         capacity = group.get("capacity") or "other"
-        label = "Other" if capacity == "other" else _esc(capacity)
-        lines.append(f"{label}: " + " · ".join(parts))
+        label = "Other" if capacity == "other" and _lang(language) == "en" else capacity
+        if capacity == "other" and _lang(language) == "de":
+            label = "Andere"
+        lines.append(f"{_esc(label)}: " + " · ".join(parts))
     return lines
 
 
-def _first_price(group: dict[str, Any]) -> float:
-    offers = group.get("offers") or []
-    if not offers:
-        return float("inf")
-    try:
-        return float(offers[0].get("price"))
-    except (TypeError, ValueError):
-        return float("inf")
-
-
-def _verdict(deals: list[dict[str, Any]], groups: list[dict[str, Any]]) -> str | None:
+def _verdict(
+    deals: list[dict[str, Any]], groups: list[dict[str, Any]], language: str
+) -> str | None:
     """One data-backed sentence about the ranked best deal, not the absolute cheapest.
 
     A grade-C bargain is not the answer to "best deal"; the ranking already says which
@@ -223,18 +371,22 @@ def _verdict(deals: list[dict[str, Any]], groups: list[dict[str, Any]]) -> str |
 
     top = deals[0]
     currency = top.get("currency")
-    text = f"Best value: {_money(top.get('price'), currency)}"
+    text = _money(top.get("price"), currency, language)
     if top.get("condition"):
-        text += f" ({_esc(top['condition'])})"
+        text += f" ({_esc(_condition(top['condition'], language))})"
     if top.get("shop"):
-        text += f" at {_esc(top['shop'])}"
+        text += f" {_t(language, 'at', shop=_esc(top['shop']))}"
 
     discount = top.get("vs_average_pct")
     try:
         if discount is not None and float(discount) >= 0:
-            text += f", {_percent(discount)} below its own average"
+            text += ", " + _t(
+                language,
+                "below_average_short",
+                pct=_percent(discount, language),
+            )
         if float(top.get("vs_low_pct")) >= 0:
-            text += ", the lowest price recorded for this variant"
+            text += ", " + _t(language, "lowest_variant")
     except (TypeError, ValueError):
         pass
     text += "."
@@ -257,78 +409,119 @@ def _verdict(deals: list[dict[str, Any]], groups: list[dict[str, Any]]) -> str |
     new_extra = premium("new")
     like_new_extra = premium("like new")
     if new_extra is not None:
-        text += f" New costs {_money(_whole(new_extra), currency)} more"
+        text += " " + _t(
+            language, "new_costs_more", amount=_money(_whole(new_extra), currency, language)
+        )
         if like_new_extra is not None:
-            text += f", like new {_money(_whole(like_new_extra), currency)} more"
+            text += ", " + _t(
+                language,
+                "like_new_short",
+                amount=_money(_whole(like_new_extra), currency, language),
+            )
         text += "."
     elif like_new_extra is not None:
-        text += f" Like new costs {_money(_whole(like_new_extra), currency)} more."
+        text += " " + _t(
+            language,
+            "like_new_costs_more",
+            amount=_money(_whole(like_new_extra), currency, language),
+        ) + "."
 
     if (
         new_extra is not None
         and like_new_extra is not None
         and top.get("condition") not in ("new", "like new")
     ):
-        text += " Like new is usually the best compromise."
+        text += " " + _t(language, "like_new_compromise")
 
     return text
 
 
-def format_deals(payload: dict[str, Any]) -> str:
+def format_verdict(payload: dict[str, Any], language: str = "en") -> str | None:
+    """The deterministic verdict on its own, used when the AI paragraph fails."""
+    verdict = _verdict(
+        payload.get("deals") or [], payload.get("groups") or [], language
+    )
+    if not verdict:
+        return None
+    return f"<b>{_t(language, 'verdict')}:</b> {verdict}"
+
+
+def format_deals(
+    payload: dict[str, Any],
+    language: str = "en",
+    *,
+    include_verdict: bool = True,
+) -> str:
     query = payload.get("query") or ""
     deals = payload.get("deals") or []
     if not deals:
-        return f'Nothing matched "{_esc(query)}".'
+        return _t(language, "nothing_matched", query=_esc(query))
 
     compared = payload.get("compared") or len(deals)
     matched = payload.get("matched")
-    counts = f"{compared} compared"
     if isinstance(matched, int) and matched > compared:
-        counts = f"{matched} matches · {compared} compared"
+        counts = _t(
+            language, "matches_compared", matched=matched, compared=compared
+        )
+    else:
+        counts = _t(language, "compared", compared=compared)
 
     lines = [f"<b>{_esc(query)}</b> — {counts}", ""]
     for index, deal in enumerate(deals, start=1):
-        lines.extend(_deal_lines(index, deal))
+        lines.extend(_deal_lines(index, deal, language))
         if index < len(deals):
             lines.append("")
 
     groups = payload.get("groups") or []
-    group_lines = _group_lines(groups)
+    group_lines = _group_lines(groups, language)
     if group_lines:
-        lines += ["", "<b>Prices by condition</b>", *group_lines]
+        lines += ["", f"<b>{_t(language, 'prices_by_condition')}</b>", *group_lines]
 
-    verdict = _verdict(deals, groups)
-    if verdict:
-        lines += ["", f"<b>Verdict:</b> {verdict}"]
+    if include_verdict:
+        verdict = _verdict(deals, groups, language)
+        if verdict:
+            lines += ["", f"<b>{_t(language, 'verdict')}:</b> {verdict}"]
 
     partial = payload.get("partial") or {}
     missing = []
     if partial.get("details"):
-        missing.append("offer links")
+        missing.append("offer links" if _lang(language) == "en" else "Angebotslinks")
     if partial.get("history"):
-        missing.append("price history")
+        missing.append("price history" if _lang(language) == "en" else "Preisverlauf")
     if missing:
-        reason = " (rate limit)" if partial.get("rate_limited") else ""
-        lines += [
-            "",
-            f"<i>Some {' and '.join(missing)} could not be loaded{reason}; "
-            "try again in a moment.</i>",
-        ]
+        if partial.get("rate_limited"):
+            reason = (
+                " (Limit erreicht)" if _lang(language) == "de" else " (rate limit)"
+            )
+        else:
+            reason = ""
+        if _lang(language) == "de":
+            note = f"Ein Teil ({', '.join(missing)}) konnte nicht geladen werden{reason}; bitte gleich noch einmal versuchen."
+        else:
+            note = f"Some {' and '.join(missing)} could not be loaded{reason}; try again in a moment."
+        lines += ["", f"<i>{_esc(note)}</i>"]
 
-    lines += ["", "<i>Prices from the Pricewatcha catalog; the shop page is authoritative.</i>"]
+    lines += ["", f"<i>{_t(language, 'footer')}</i>"]
     return "\n".join(lines)
 
 
-def format_search(payload: dict[str, Any]) -> str:
+def format_search(payload: dict[str, Any], language: str = "en") -> str:
     query = payload.get("query") or ""
     results = payload.get("results") or []
     if not results:
-        return f'Nothing matched "{_esc(query)}".'
+        return _t(language, "nothing_matched", query=_esc(query))
 
-    lines = [f'Search "{_esc(query)}" — {payload.get("count") or len(results)} matches:']
+    lines = [
+        _t(
+            language,
+            "search_header",
+            query=_esc(query),
+            count=payload.get("count") or len(results),
+        )
+    ]
     for result in results:
         name = _esc(result.get("name") or result.get("product_id") or "?")
-        price = _money(result.get("current_price"), result.get("currency"))
+        price = _money(result.get("current_price"), result.get("currency"), language)
         shop = _esc(result.get("shop") or "?")
         lines.append(f"{name} — {price} · {shop}")
         if result.get("product_url"):
@@ -338,39 +531,55 @@ def format_search(payload: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
-def format_alerts(payload: dict[str, Any]) -> str:
+def format_alerts(payload: dict[str, Any], language: str = "en") -> str:
     alerts = payload.get("alerts") or []
     if not alerts:
-        return "No price alerts set."
+        return _t(language, "alerts_empty")
 
-    lines = ["Your price alerts:"]
+    lines = [_t(language, "alerts_header")]
     for alert in alerts:
         name = _esc(alert.get("name") or alert.get("product_id") or "?")
         parts = []
         if alert.get("notify_on_drop"):
-            parts.append("on any drop")
+            parts.append(_t(language, "on_any_drop"))
         if alert.get("notify_on_rise"):
-            parts.append("on any rise")
+            parts.append(_t(language, "on_any_rise"))
         if alert.get("min_threshold_price"):
-            parts.append(f"min {_money(alert['min_threshold_price'], alert.get('currency'))}")
+            parts.append(
+                _t(
+                    language,
+                    "min",
+                    price=_money(
+                        alert["min_threshold_price"], alert.get("currency"), language
+                    ),
+                )
+            )
         if alert.get("max_threshold_price"):
-            parts.append(f"max {_money(alert['max_threshold_price'], alert.get('currency'))}")
-        state = "" if alert.get("is_active", True) else " (paused)"
-        detail = ", ".join(parts) if parts else "no condition"
+            parts.append(
+                _t(
+                    language,
+                    "max",
+                    price=_money(
+                        alert["max_threshold_price"], alert.get("currency"), language
+                    ),
+                )
+            )
+        state = "" if alert.get("is_active", True) else f" {_t(language, 'paused')}"
+        detail = ", ".join(parts) if parts else _t(language, "no_condition")
         lines.append(f"#{alert.get('alert_id')} {name} — {detail}{state}")
     return "\n".join(lines)
 
 
-def format_track(payload: dict[str, Any]) -> str:
+def format_track(payload: dict[str, Any], language: str = "en") -> str:
     status = payload.get("status") or "unknown"
     product = payload.get("product") or {}
     error = payload.get("error") or {}
 
     if status == "completed" and product:
-        lines = [f"Tracking submitted: {_esc(status)}"]
+        lines = [_t(language, "tracking_submitted", status=_esc(status))]
         lines.append(
             f"{_esc(product.get('name') or '?')} — "
-            f"{_money(product.get('current_price'), product.get('currency'))}"
+            f"{_money(product.get('current_price'), product.get('currency'), language)}"
         )
         if product.get("product_url"):
             url = product["product_url"]
@@ -378,26 +587,29 @@ def format_track(payload: dict[str, Any]) -> str:
         return "\n".join(lines)
 
     if status == "failed":
-        return (
-            f"Tracking failed: {_esc(error.get('code') or 'unknown')} — "
-            f"{_esc(error.get('message') or '')}"
+        return _t(
+            language,
+            "tracking_failed",
+            code=_esc(error.get("code") or "unknown"),
+            message=_esc(error.get("message") or ""),
         ).strip()
 
     return (
-        f"Tracking submitted: {_esc(status)}\n"
-        f"Job {_esc(payload.get('job_id') or '?')} is still running; the price appears "
-        "on the next poll."
+        _t(language, "tracking_submitted", status=_esc(status))
+        + "\n"
+        + _t(language, "tracking_running", job=_esc(payload.get("job_id") or "?"))
     )
 
 
-def format_price_drop(data: dict[str, Any]) -> str:
+def format_price_drop(data: dict[str, Any], language: str = "en") -> str:
     name = _esc(data.get("name") or data.get("product_id") or "?")
     currency = data.get("currency")
     lines = [
-        f"Price drop: {name}",
-        f"{_money(data.get('new_price'), currency)} "
-        f"(was {_money(data.get('old_price'), currency)}, {_percent(data.get('change_pct'))}) "
-        f"at {_esc(data.get('shop') or '?')}",
+        _t(language, "price_drop", name=name),
+        f"{_money(data.get('new_price'), currency, language)} "
+        f"({_t(language, 'was', price=_money(data.get('old_price'), currency, language))}, "
+        f"{_percent(data.get('change_pct'), language)}) "
+        f"{_t(language, 'at', shop=_esc(data.get('shop') or '?'))}",
     ]
     if data.get("product_url"):
         url = data["product_url"]
@@ -405,8 +617,8 @@ def format_price_drop(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_usage(command: str, example: str) -> str:
-    return f"Usage: {command} {example}"
+def format_usage(command: str, example: str, language: str = "en") -> str:
+    return _t(language, "usage", command=command, example=example)
 
 
 def format_ai_section(
@@ -416,15 +628,13 @@ def format_ai_section(
     answer: bool = False,
 ) -> str:
     """The optional AI paragraph: label, grounded text, and what it cost."""
-    german = language == "de"
-    if answer:
-        label = "Antwort" if german else "Answer"
-    else:
-        label = "Einschätzung" if german else "AI take"
+    german = _lang(language) == "de"
+    label = _t(language, "ai_answer" if answer else "ai_label")
     model = getattr(result, "model", "") or "AI"
     spent = float(getattr(result, "spent_today", 0.0) or 0.0)
+    spent_text = f"{spent:.4f}".replace(".", ",") if german else f"{spent:.4f}"
     footer = (
-        f"{model} · {spent:.4f} $ heute" if german else f"{model} · ${spent:.4f} today"
+        f"{model} · {spent_text} $ {_t(language, 'today')}"
     )
     return (
         f"<b>{label}</b>\n{_esc(getattr(result, 'text', ''))}"
@@ -459,7 +669,7 @@ _AI_REASONS = {
 
 
 def format_ai_unavailable(reason: str, language: str = "de") -> str:
-    german = language == "de"
-    label = "KI nicht verfügbar" if german else "AI unavailable"
+    german = _lang(language) == "de"
+    label = _t(language, "ai_unavailable")
     text = _AI_REASONS["de" if german else "en"].get(reason, reason)
     return f"<b>{label}</b>\n{_esc(text)}"
