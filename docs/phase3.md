@@ -1,8 +1,8 @@
 # Phase 3 — the optional AI layer
 
 This plan keeps the integration useful without an AI key and adds one only as an
-optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
-3b–3d are deliberately paused until 3a has been reviewed with a real key.
+optional layer on top of the deterministic answer. 3a is implemented through 0.4.2;
+3b–3d are deliberately paused until the next review.
 
 ## Principles
 
@@ -41,20 +41,80 @@ optional layer on top of the deterministic answer. 3a is implemented in 0.4.0;
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
 breaks the deterministic reply; 97 tests pass.
 
-## 3b — offers outside the catalog (next, after review)
+## 3b — provider-neutral web search for `/ask` (next)
 
-Goal: show Saturn/MediaMarkt/idealo offers that are not in the Pricewatcha catalog,
-clearly marked as unverified and never mixed into the catalog table.
+Goal: **every** configured model — including Ollama, LM Studio, vLLM, OpenRouter and
+Groq — can look up current offers, sales and news for a question and cite what it used.
+`/deal` stays catalog-only; external offers are never mixed into its table.
 
-Two implementations, chosen by provider:
+### Decision (2026-11-22)
 
-- **DeepSeek:** server-side `deepseek_web_search` / `deepseek_read_url` tools, with
-  citations. Search is free since 2026-11-18, results are billed as tokens.
-- **Everything else:** DuckDuckGo/SearXNG candidates → the model may only pick from the
-  supplied URLs → JSON-LD/meta backfill for price and image (the `price_watch` pattern).
+There is **no SearXNG instance** available for this installation. DuckDuckGo therefore
+becomes the default external search; SearXNG stays an optional base URL for later and
+nothing in the design assumes it exists.
 
-Open decisions: whether web offers are opt-in per chat, how to mark them, and whether
-shipping/region filtering is needed.
+### Order of preference
+
+1. **Native provider tool**, when the provider has one and it is enabled:
+   - DeepSeek `deepseek_web_search` — already implemented in 0.4.2 (Chat Completions,
+     thinking disabled, citations from `message.annotations`).
+   - Anthropic `web_search` and OpenAI `web_search` can be added later; each has its own
+     request/response shape and pricing.
+2. **SearXNG JSON**, when `searxng_url` is configured — preferred for privacy and
+   reliability, but optional.
+3. **DuckDuckGo HTML** (`https://html.duckduckgo.com/html/?q=…`) as the zero-config
+   fallback: free, no key, no setup. Brittle (markup changes, occasional rate limits),
+   which is why SearXNG remains an option.
+4. **No search**: answer from the price history and general market knowledge, exactly as
+   non-DeepSeek providers do today. A failed search must never turn into an error.
+
+### Data flow
+
+1. Build a query from the product/query plus the question, dropping filler words and
+   capping the length (e.g. `iPhone Air wolkenweiß Black Friday Angebote 2026`).
+2. Fetch the top ~5 results: title, URL, snippet. Optionally fetch the top 1–2 pages for
+   JSON-LD/meta price and image (the `price_watch` pattern); snippets are enough for a
+   first version.
+3. Hand the results to the model as compact JSON. The system prompt:
+   - may only cite URLs from that JSON — no invented links or shops;
+   - separates catalog data (below) from web findings;
+   - may give a reasoned estimate about future sales, clearly labelled;
+   - mentions external prices only with a source.
+4. Append up to four sources below the answer, in the same `Quellen` layout DeepSeek uses.
+5. Cache search results per query for ~30 minutes; fetch timeout ~8 s, page timeout ~5 s.
+   On failure, continue without web results.
+
+### Configuration
+
+| Key | Meaning |
+| --- | --- |
+| `ai_web_search` | existing on/off switch for `/ask` |
+| `web_search_provider` | `auto` (default), `duckduckgo`, `searxng` |
+| `searxng_url` | optional self-hosted instance, used when provider is `auto` or `searxng` |
+
+No key is needed for DuckDuckGo or SearXNG. Brave/Tavily can be added later behind the
+same interface if a user wants more reliability and is willing to bring a key.
+
+### Acceptance
+
+- Ollama + DuckDuckGo answers a Black Friday question with current offers and sources.
+- DuckDuckGo/SearXNG unreachable → catalog-only answer, no user-facing error and no
+  broken Telegram message.
+- `/deal` output is unchanged; external prices still cannot enter its assessment.
+- Only URLs returned by the search provider appear as sources.
+- Tests mock the search HTTP; CI never calls DuckDuckGo or a real SearXNG.
+
+### Risks and open questions
+
+- DuckDuckGo HTML parsing is brittle and may be blocked; SearXNG (or a paid API) is the
+  escape hatch.
+- Privacy: the query leaves Home Assistant for DuckDuckGo or the SearXNG operator. The
+  toggle must stay off-by-choice and the README must say so.
+- Rate limits and caching: one search per `/ask`, cached per query.
+- Whether to fetch pages at all in the first version, or start with snippets only.
+- Shipping/region filtering for external offers is **not** part of 3b; that would be a
+  later refinement.
+- External offers are **not** merged into `/deal`; that remains a separate decision.
 
 ## 3c — photos and condition
 
@@ -82,6 +142,6 @@ follow-up (more magic) or stay a search.
 | 3a | 0.4.0 | AI advisor, provider config, `/ask`, budgets |
 | 3a.1 | 0.4.1 | one verdict (AI replaces the deterministic one), full-language replies |
 | 3a.2 | 0.4.2 | `/ask` may reason about future sales; DeepSeek web search with sources |
-| 3b | 0.4.3 | web offers for providers without native search (DDG/SearXNG) |
+| 3b | 0.4.3 | provider-neutral `/ask` search: DuckDuckGo default, optional SearXNG |
 | 3c | 0.4.4 | product photos / condition |
 | 3d | 0.4.5 | persistent conversation memory |
