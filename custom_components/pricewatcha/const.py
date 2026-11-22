@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.2.0"
+VERSION: Final = "0.3.0"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -19,8 +19,10 @@ API_TRACK_TIMEOUT: Final = 40  # the track endpoint long-polls for ~25s
 
 CONF_API_KEY: Final = "api_key"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
+CONF_TELEGRAM_MIN_DROP: Final = "telegram_min_drop_pct"
 
 DEFAULT_SCAN_INTERVAL: Final = 30  # minutes
+DEFAULT_TELEGRAM_MIN_DROP: Final = 2.0  # percent
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 1440
 

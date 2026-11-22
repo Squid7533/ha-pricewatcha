@@ -32,7 +32,8 @@
       "init": {
         "title": "Pricewatcha options",
         "data": {
-          "scan_interval": "Poll interval (minutes)"
+          "scan_interval": "Poll interval (minutes)",
+          "telegram_min_drop_pct": "Minimum drop to notify (%)"
         }
       }
     }

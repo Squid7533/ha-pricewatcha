@@ -26,7 +26,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Create a sensor per watched product, adding newly watched ones as they appear."""
-    coordinator: PricewatchaCoordinator = entry.runtime_data
+    coordinator: PricewatchaCoordinator = entry.runtime_data.coordinator
     known: set[str] = set()
 
     @callback

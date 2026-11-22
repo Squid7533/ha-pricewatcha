@@ -16,7 +16,9 @@ from .api import PricewatchaApiError, PricewatchaAuthError, PricewatchaRateLimit
 from .const import (
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
+    CONF_TELEGRAM_MIN_DROP,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TELEGRAM_MIN_DROP,
     DOMAIN,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
@@ -129,7 +131,21 @@ class PricewatchaOptionsFlow(OptionsFlow):
                             unit_of_measurement="min",
                             mode=selector.NumberSelectorMode.BOX,
                         )
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_TELEGRAM_MIN_DROP,
+                        default=self.config_entry.options.get(
+                            CONF_TELEGRAM_MIN_DROP, DEFAULT_TELEGRAM_MIN_DROP
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=50,
+                            step=0.5,
+                            unit_of_measurement="%",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
                 }
             ),
         )

@@ -18,6 +18,8 @@ the account features (watchlist, price alerts) need a free
 - **Services** for search, price history, tracking a URL, watch/unwatch, alerts and an
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
+- **Telegram commands** — `/deal`, `/search`, `/track`, `/watch`, `/alerts` from your phone,
+  plus price-drop pushes, with no YAML and no chat id to look up.
 - **Config flow** — paste the key once in the UI; reauth is supported when you rotate it.
 
 ## Install
@@ -143,22 +145,14 @@ automation:
 
 ## Telegram bot
 
-`examples/telegram.yaml` is a drop-in package that turns a Telegram bot into a command
-line for Pricewatcha — the phone-side interface that needs no tunnel, no connector and no
-API key in the chat:
+No YAML, no helpers, no chat id to look up. The integration listens to the events Home
+Assistant's Telegram bot already fires and replies through its `send_message` service;
+the first chat that writes to the bot becomes the owner and is remembered.
 
-1. Create a bot with **@BotFather** in Telegram and copy the token.
-2. Home Assistant → **Settings → Devices & services → Add integration → Telegram bot**,
+1. **@BotFather** in Telegram → `/newbot` → copy the token.
+2. Home Assistant → **Settings → Devices & services → Add integration → Telegram bot** →
    paste the token (polling).
-3. Copy `examples/telegram.yaml` to `config/packages/` and ensure `configuration.yaml` has:
-
-```yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
-
-4. Restart, then message your bot once — the first message teaches the package your chat
-   id, which also receives price-drop notifications.
+3. Message your bot anything. That's it — it adopts that chat and starts answering.
 
 | Command | Does |
 | --- | --- |
@@ -170,8 +164,19 @@ homeassistant:
 | `/alerts` | your price alerts |
 | `/help` | the command list |
 
-`input_number.pricewatcha_min_drop_pct` (default 2 %) sets the smallest drop worth a
-notification; `input_text.pricewatcha_chat_id` holds the learned chat.
+**Price drops push on their own** once a chat is known: when a watched product falls by at
+least the threshold, the bot sends the new price, the old one and the link. The threshold
+lives in **Configure** on the integration (default 2 %), and rises are never sent.
+
+Only the first chat is accepted; a second one gets "This bot is already connected to
+someone else's Home Assistant." To hand the bot to another chat, delete the
+`pricewatcha.telegram` entry in `.storage` and message again.
+
+### Prefer automations?
+
+`examples/telegram.yaml` does the same job as a YAML package. **Do not install both** —
+you would get every reply twice. The built-in front-end is the recommended path; the
+package exists for people who want the logic visible in their automations.
 
 ## Quotas and behaviour
 
@@ -185,7 +190,7 @@ notification; `input_text.pricewatcha_chat_id` holds the learned chat.
 
 ## Not (yet) included
 
-- **Assist intents** — planned for 0.3.0, so a Claude/OpenAI conversation agent can call
+- **Assist intents** — planned for 0.4.0, so a Claude/OpenAI conversation agent can call
   `best_deal` straight from a chat instead of the `/deal` command.
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
