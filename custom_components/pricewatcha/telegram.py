@@ -158,6 +158,41 @@ async def set_bot_commands(session, token: str, commands: list[tuple[str, str]])
             raise RuntimeError(f"setMyCommands failed: HTTP {response.status} {body[:200]}")
 
 
+def _schema_fields(schema: Any, seen: set[int] | None = None) -> set[str]:
+    """The field names a service schema accepts.
+
+    Home Assistant registers a service with the schema it was given, and that is not
+    always a bare `vol.Schema`: `telegram_bot.send_message` wraps its schema in a
+    validator chain (`vol.All(cv.deprecated("timeout"), vol.Schema(...))`, later
+    `probatio.All(...)`). `.validators` is followed through such a chain, `.schema` is
+    the field mapping of the inner schema.
+    """
+    if schema is None:
+        return set()
+    seen = set() if seen is None else seen
+    if id(schema) in seen:
+        return set()
+    seen.add(id(schema))
+
+    mapping = getattr(schema, "schema", None)
+    if isinstance(mapping, dict):
+        fields: set[str] = set()
+        for key in mapping:
+            name = getattr(key, "schema", key)
+            if isinstance(name, str):
+                fields.add(name)
+        return fields
+    if mapping is not None:
+        fields = _schema_fields(mapping, seen)
+        if fields:
+            return fields
+
+    fields = set()
+    for child in getattr(schema, "validators", None) or ():
+        fields |= _schema_fields(child, seen)
+    return fields
+
+
 class TelegramFrontend:
     """Answers Telegram commands and pushes price drops."""
 
@@ -265,9 +300,10 @@ class TelegramFrontend:
     def _chat_param_name(self, service_name: str = TELEGRAM_SEND_MESSAGE) -> str:
         """Which field this Home Assistant calls the destination chat.
 
-        `target` is deprecated and stops working in 2026.9.0 in favour of `chat_id`, so
-        the supported field is read from the registered service schema instead of
-        guessing from the version.
+        `target` is deprecated in favour of `chat_id`, and Home Assistant reports a repair
+        issue every time it receives one: the issue is named after the caller, so a call
+        from here shows up as "call_service". `chat_id` is therefore used whenever the
+        service accepts it, and `target` only on a Home Assistant that predates it.
         """
         if service_name in self._chat_params:
             return self._chat_params[service_name]
@@ -275,15 +311,17 @@ class TelegramFrontend:
         services = self.hass.services.async_services()
         telegram = services.get(TELEGRAM_DOMAIN, {})
         service = telegram.get(service_name) or telegram.get(TELEGRAM_SEND_MESSAGE)
-        validators = getattr(getattr(service, "schema", None), "schema", None)
-        keys = {
-            getattr(key, "schema", key)
-            for key in validators
-        } if isinstance(validators, dict) else set()
+        fields = _schema_fields(getattr(service, "schema", None))
 
-        param = "chat_id" if "chat_id" in keys else "target"
-        if param == "target":
+        if "chat_id" in fields:
+            param = "chat_id"
+        elif "target" in fields:
+            param = "target"
             _LOGGER.debug("Telegram bot service still expects 'target'; using it")
+        else:
+            # A schema we cannot read is a wrapper (`vol.All`, `probatio.All`), which
+            # only current Home Assistants build - and those all take `chat_id`.
+            param = "chat_id"
         self._chat_params[service_name] = param
         return param
 

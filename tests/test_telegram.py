@@ -41,18 +41,23 @@ class FakeServices:
         self.calls: list[tuple[str, str, dict]] = []
         self.available = True
         self.chat_fields = {"chat_id"}
+        self.wrap_schema = False
+        self.unreadable_schema = False
         self.reject_html = False
 
     def has_service(self, domain: str, service: str) -> bool:
         return self.available
 
     def async_services(self):
+        if self.unreadable_schema:
+            return {"telegram_bot": {"send_message": SimpleNamespace(schema=None)}}
         markers = {field: None for field in self.chat_fields}
-        return {
-            "telegram_bot": {
-                "send_message": SimpleNamespace(schema=SimpleNamespace(schema=markers))
-            }
-        }
+        schema = SimpleNamespace(schema=markers)
+        if self.wrap_schema:
+            # `vol.All(cv.deprecated("timeout"), vol.Schema({...}))` and its probatio
+            # twin: the field mapping sits one `.validators` hop down.
+            schema = SimpleNamespace(validators=[SimpleNamespace(), schema])
+        return {"telegram_bot": {"send_message": SimpleNamespace(schema=schema)}}
 
     async def async_call(self, domain, service, data, blocking=False):
         if self.reject_html and data.get("parse_mode") == "html":
@@ -739,6 +744,43 @@ def test_falls_back_to_target_on_older_home_assistant():
         payload = hass.services.calls[0][2]
         assert payload["target"] == [5]
         assert "chat_id" not in payload
+
+    run(scenario())
+
+
+def test_finds_chat_id_behind_a_wrapped_service_schema():
+    """HA 2026.9+ registers the schema as `vol.All(deprecated(...), Schema(...))`.
+
+    Reading only `.schema` of the wrapper found nothing, assumed an old Home Assistant
+    and sent `target` - which is what raised the "target is deprecated" repair.
+    """
+    async def scenario():
+        hass = FakeHass()
+        hass.services.wrap_schema = True
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        hass.bus.fire("telegram_command", {"chat_id": 7, "command": "/help", "args": []})
+        await asyncio.sleep(0.05)
+
+        payload = hass.services.calls[0][2]
+        assert payload["chat_id"] == [7]
+        assert "target" not in payload
+
+    run(scenario())
+
+
+def test_prefers_chat_id_when_the_schema_cannot_be_read():
+    async def scenario():
+        hass = FakeHass()
+        hass.services.unreadable_schema = True
+        frontend = TelegramFrontend(hass, FakeCoordinator(), 2.0)
+        await frontend.async_start()
+        hass.bus.fire("telegram_command", {"chat_id": 8, "command": "/help", "args": []})
+        await asyncio.sleep(0.05)
+
+        payload = hass.services.calls[0][2]
+        assert payload["chat_id"] == [8]
+        assert "target" not in payload
 
     run(scenario())
 

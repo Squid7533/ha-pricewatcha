@@ -15,8 +15,8 @@
 #
 # Commands: /deal /search /track /watch /alerts /help
 #
-# Uses `chat_id`, which replaces the deprecated `target` field (removed in HA 2026.9).
-# On Home Assistant before that, use `target:` instead.
+# Uses `chat_id`, which replaces the deprecated `target` field. `chat_id` arrived in
+# HA 2026.3; on an older Home Assistant use `target:` instead.
 # Free text without a slash is treated like /deal.
 
 input_text:

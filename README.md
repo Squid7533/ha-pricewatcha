@@ -442,10 +442,16 @@ shop and URL it prints. If Telegram still rejects a message, the integration ret
 same text as `plain_text`, so the reply arrives either way; the debug log shows the
 error. Please report the product name that broke it.
 
-**A repair says `target` is deprecated for `telegram_bot.send_message`.** The integration
-already picks `chat_id` or `target` from the service schema at runtime, so it keeps working
-before and after HA 2026.9. If you also installed `examples/telegram.yaml`, that file now
-uses `chat_id` too; older Home Assistants need `target` there instead.
+**A repair says `target` is deprecated for `telegram_bot.send_message`.** Up to 0.10.0
+the integration read the service schema one level too shallow: since Home Assistant 2026.9
+the `send_message` schema is wrapped in a validator chain
+(`vol.All(cv.deprecated("timeout"), vol.Schema(...))`, later `probatio.All(...)`), so
+`chat_id` was not found, the code assumed an old Home Assistant and sent `target` — which
+is exactly what raises that repair, named `call_service` because no automation originated
+the call. 0.10.1 walks the wrapper and sends `chat_id` wherever the service offers it.
+The repair is persistent, so dismiss it once (**Submit**) after upgrading; it stays gone.
+If you also installed `examples/telegram.yaml`, that file uses `chat_id` too — it only
+needs `target` on a Home Assistant before 2026.3, where the service had no `chat_id` yet.
 
 **Updates stop after a Home Assistant restart.** Check the integration is still loaded and
 that the allowed chat survived; a re-added bot creates a new entry with no chats.
