@@ -1,4 +1,4 @@
-"""Product photo and condition from a merchant page (3c).
+"""Product photo, condition and web price from a merchant page (3c/0.6.0).
 
 The catalog has no image field, so the only way to show a photo in Telegram is to
 read the merchant page the offer links to. This module fetches that one page (top
@@ -17,6 +17,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urljoin
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,6 +49,17 @@ class PageMedia:
     image_url: str | None = None
     condition: str | None = None
     title: str | None = None
+
+
+@dataclass(slots=True)
+class PageOffer:
+    """The product name, price and condition a shop page exposes."""
+
+    title: str
+    price: float
+    currency: str
+    condition: str | None = None
+    url: str | None = None
 
 
 @dataclass(slots=True)
@@ -100,6 +112,106 @@ def _walk(value):
     elif isinstance(value, list):
         for item in value:
             yield from _walk(item)
+
+
+def _price(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.replace(" ", "").replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _query_tokens(query: str) -> list[str]:
+    stop = {
+        "kaufen", "preis", "preise", "angebot", "angebote", "shop", "online",
+        "der", "die", "das", "und", "für", "fur", "mit", "bei", "von", "the",
+    }
+    tokens = []
+    for raw in re.split(r"[^0-9a-zäöüß]+", query.casefold().replace("ß", "ss")):
+        if len(raw) >= 2 and raw not in stop:
+            tokens.append(raw)
+    return tokens
+
+
+def _matches(name: str, tokens: list[str]) -> int:
+    normalized = re.sub(r"[^0-9a-zäöüß]+", "", name.casefold().replace("ß", "ss"))
+    return sum(1 for token in tokens if token in normalized)
+
+
+def parse_page_offer(body: str, page_url: str, query: str = "") -> PageOffer | None:
+    """Best matching Product offer on a shop page.
+
+    Retailer pages often list every colour and storage size; the query tokens pick
+    the variant the user actually asked for instead of the first one in the JSON-LD.
+    """
+    tokens = _query_tokens(query)
+    candidates: list[tuple[int, float, PageOffer]] = []
+    for match in _JSONLD_RE.finditer(body):
+        raw = html.unescape(match.group(1)).strip()
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        for node in _walk(data):
+            types = node.get("@type")
+            types = types if isinstance(types, list) else [types]
+            if not any(str(kind).lower() == "product" for kind in types):
+                continue
+            name = node.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            offers = node.get("offers")
+            for offer in offers if isinstance(offers, list) else [offers]:
+                if not isinstance(offer, dict):
+                    continue
+                price = _price(offer.get("price") or offer.get("lowPrice"))
+                if price is None or price <= 0:
+                    continue
+                score = _matches(name, tokens)
+                if tokens and score < len(tokens):
+                    continue
+                url = offer.get("url")
+                if isinstance(url, str) and url:
+                    url = urljoin(page_url, url)
+                else:
+                    url = page_url
+                candidates.append(
+                    (
+                        score,
+                        price,
+                        PageOffer(
+                            title=name,
+                            price=price,
+                            currency=str(offer.get("priceCurrency") or "EUR"),
+                            condition=_condition_from_jsonld(
+                                offer.get("itemCondition")
+                            )
+                            or _condition_from_jsonld(node.get("itemCondition")),
+                            url=url,
+                        ),
+                    )
+                )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2]
+
+
+async def fetch_page_offer(
+    page_url: str, query: str = "", *, timeout: int = 7
+) -> PageOffer | None:
+    """Fetch one shop page and read its Schema.org Product offer."""
+    if not page_url.startswith("http"):
+        return None
+    response = await _curl_get(page_url, timeout=timeout)
+    if response is None or response.status_code != 200:
+        return None
+    return parse_page_offer(response.text, page_url, query)
 
 
 def parse_page_media(body: str, page_url: str) -> PageMedia:

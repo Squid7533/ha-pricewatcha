@@ -170,7 +170,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 
 | Command | Does |
 | --- | --- |
-| `/deal iphone 18 pro` | best value, condition, price history, links and a verdict |
+| `/deal iphone 18 pro` | best value, condition, price history, links and a verdict, plus confirmed web finds from shops outside the catalog |
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
 | anything without a slash | an action goes to the AI planner; a question becomes `/ask`; otherwise a search |
 | `/search iphone 18 pro` | numbered catalog matches with prices and shops |
@@ -208,6 +208,17 @@ Home Assistant restarts: `/ask` works without a new search, and with AI configur
 plain question after a deal is treated as a follow-up. `/reset` forgets it; a new
 `/deal` starts a fresh conversation. The memory lives in
 `config/.storage/pricewatcha.conversations`.
+
+### Web finds in `/deal`
+
+After the catalog table, `/deal` searches the open web for the same product once. It
+fetches the first three direct shop results (not comparison sites) and reads the
+Schema.org Product offer, so the price is the shop's price, not a snippet guess. Up to
+three offers within 135% of the catalog's best price are shown under **Web finds
+(unverified)**, including condition when the page states it. They are clearly separate
+from the catalog and never change the catalog verdict; if one is cheaper, the verdict
+adds a note. `/track 1` watches the first web find. Turn the search off with
+**Configure → AI → Use web search for /ask and /deal**.
 
 ### Talking to the bot
 
@@ -277,7 +288,7 @@ assistant**:
 | Base URL | DeepSeek `https://api.deepseek.com`, OpenAI `https://api.openai.com/v1`, Anthropic `https://api.anthropic.com`, Ollama `http://192.168.1.10:11434/v1` |
 | Model | Free text. DeepSeek preset is `deepseek-flash`; Ollama e.g. `llama3.1` |
 | API key | Your own key; leave empty for a local server |
-| Web search for `/ask` | DeepSeek uses its native search; every other provider uses DuckDuckGo (no key), or SearXNG if configured. `/deal` stays catalog-only |
+| Web search | DeepSeek uses its native search for `/ask`; every other provider uses DuckDuckGo (no key), or SearXNG if configured. `/deal` uses the same DDG/SearXNG path for confirmed shop offers |
 | Language | Set under **General**; applies to the table and the AI text |
 | Budgets | USD per day and per month, checked before every call; `0` means no limit |
 
@@ -371,9 +382,10 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
 
 - **Assist intents** — the AI advisor is Telegram-only for now; a conversation agent
   that calls `best_deal` directly is not wired up yet.
-- **A merged external-offer view** — `/ask` searches the web for every provider and
-  cites sources, but `/deal` does not merge external offers into the catalog table.
-  Fetching result pages for JSON-LD prices is in [docs/phase3.md](docs/phase3.md).
+- **Complete external coverage** — `/deal` now confirms prices on the first two direct
+  shop results and lists them as unverified web finds; comparison sites (idealo,
+  billiger, geizhals) are skipped, and a blocked shop page means no web find. It is not a
+  full market scan.
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

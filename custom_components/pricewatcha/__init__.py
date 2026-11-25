@@ -36,13 +36,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
     # Raises ConfigEntryNotReady (rate limit, outage) or ConfigEntryAuthFailed (bad key).
     await coordinator.async_config_entry_first_refresh()
 
+    ai_config = AIConfig.from_options(entry.options)
     # Commands and price-drop pushes work as soon as the Telegram bot integration
     # exists; until then the listener is idle and costs nothing.
     frontend = TelegramFrontend(
         hass,
         coordinator,
         float(entry.options.get(CONF_TELEGRAM_MIN_DROP, DEFAULT_TELEGRAM_MIN_DROP)),
-        advisor=AIAdvisor(hass, AIConfig.from_options(entry.options)),
+        advisor=AIAdvisor(hass, ai_config),
         language=language_of(entry.options),
         photos=bool(entry.options.get(CONF_TELEGRAM_PHOTOS, DEFAULT_TELEGRAM_PHOTOS)),
         conversation_ttl_days=int(
@@ -50,6 +51,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
                 CONF_CONVERSATION_TTL_DAYS, DEFAULT_CONVERSATION_TTL_DAYS
             )
         ),
+        web_search=bool(
+            ai_config.web_search and ai_config.web_search_provider != "none"
+        ),
+        search_provider=ai_config.web_search_provider,
+        searxng_url=ai_config.searxng_url,
     )
     await frontend.async_start()
 

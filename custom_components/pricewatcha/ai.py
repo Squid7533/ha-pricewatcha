@@ -833,6 +833,8 @@ _ASSESSMENT_PROMPTS = {
         "Regeln:\n"
         "- Nutze nur Preise, Shops, Zustände und Zahlen aus den Daten. Erfinde nichts.\n"
         "- Wiederhole nicht die Preistabelle; nenne höchstens zwei Beträge.\n"
+        "- web_deals sind externe, unbestätigte Funde. Nenne sie nur mit Quelle und "
+        "nur, wenn sie günstiger sind; der Katalog bleibt maßgeblich.\n"
         "- Keine Spekulation über künftige Aktionen (z. B. Black Friday) oder Shops, "
         "die nicht in den Daten stehen.\n"
         "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
@@ -848,6 +850,8 @@ _ASSESSMENT_PROMPTS = {
         "Rules:\n"
         "- Use only prices, shops, conditions and numbers from the data. Invent nothing.\n"
         "- Do not repeat the price table; mention at most two amounts.\n"
+        "- web_deals are external, unverified finds. Mention them only with their "
+        "source and only when they are cheaper; the catalog stays authoritative.\n"
         "- Do not speculate about future sales (e.g. Black Friday) or shops that are "
         "not in the data.\n"
         "- No tables, no markdown, no bullet points, no emojis.\n"
@@ -1421,6 +1425,15 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ]
         if offers:
             groups.append({"capacity": group.get("capacity"), "offers": offers})
+    web_deals = [
+        {
+            key: offer.get(key)
+            for key in ("title", "url", "price", "currency", "shop")
+            if offer.get(key) is not None
+        }
+        for offer in (payload.get("web_deals") or [])[:3]
+        if isinstance(offer, dict)
+    ]
     compact = {
         "query": payload.get("query"),
         "matched": payload.get("matched"),
@@ -1428,6 +1441,8 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "deals": deals,
         "groups": groups,
     }
+    if web_deals:
+        compact["web_deals"] = web_deals
     if payload.get("partial"):
         compact["partial"] = {
             "history_missing": bool((payload["partial"] or {}).get("history")),

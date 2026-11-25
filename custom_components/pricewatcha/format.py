@@ -51,6 +51,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "see_offer": "See offer",
         "price_history": "Price history",
         "prices_by_condition": "Prices by condition",
+        "web_deals_header": "Web finds (unverified)",
+        "web_deals_hint": "Web prices are unverified; /track 1 watches one.",
         "verdict": "Verdict",
         "below_average": "{pct} below its own average ({average})",
         "above_average": "{pct} above its own average ({average})",
@@ -58,6 +60,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "above_average_short": "{pct} above its own average",
         "lowest_recorded": "lowest recorded price",
         "lowest_variant": "the lowest price recorded for this variant",
+        "web_verdict_note": "A cheaper web find is listed above (unverified).",
         "low_was": "low was {price}",
         "price_falling": "price falling",
         "new_costs_more": "New costs {amount} more",
@@ -144,6 +147,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "see_offer": "Zum Angebot",
         "price_history": "Preisverlauf",
         "prices_by_condition": "Preise nach Zustand",
+        "web_deals_header": "Web-Funde (ungeprüft)",
+        "web_deals_hint": "Web-Preise sind ungeprüft; /track 1 beobachtet eines.",
         "verdict": "Fazit",
         "below_average": "{pct} unter dem eigenen Schnitt ({average})",
         "above_average": "{pct} über dem eigenen Schnitt ({average})",
@@ -151,6 +156,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "above_average_short": "{pct} über dem eigenen Schnitt",
         "lowest_recorded": "niedrigster erfasster Preis",
         "lowest_variant": "der niedrigste erfasste Preis für diese Variante",
+        "web_verdict_note": "Ein günstigerer Web-Fund steht oben (ungeprüft).",
         "low_was": "Tief war {price}",
         "price_falling": "Preis fallend",
         "new_costs_more": "Neu kostet {amount} mehr",
@@ -570,9 +576,50 @@ def format_deals(
     if group_lines:
         lines += ["", f"<b>{_t(language, 'prices_by_condition')}</b>", *group_lines]
 
+    web_deals = [
+        item for item in (payload.get("web_deals") or []) if isinstance(item, dict)
+    ]
+    if web_deals:
+        lines += ["", f"<b>{_t(language, 'web_deals_header')}</b>"]
+        for index, offer in enumerate(web_deals[:3], start=1):
+            price = _money(offer.get("price"), offer.get("currency"), language)
+            shop = _esc(offer.get("shop") or "?")
+            detail = f"{price} · {shop}"
+            if offer.get("condition"):
+                detail += f" · {_esc(_condition(offer['condition'], language))}"
+            lines.append(f"{index}. <b>{detail}</b>")
+            title = _esc(offer.get("title") or offer.get("url") or "")
+            url = str(offer.get("url") or "")
+            if url.startswith("http"):
+                lines.append(f'<a href="{_esc_attr(url)}">{title}</a>')
+            else:
+                lines.append(title)
+        lines += ["", f"<i>{_t(language, 'web_deals_hint')}</i>"]
+
     if include_verdict:
         verdict = _verdict(deals, groups, language)
         if verdict:
+            catalog_prices = [
+                float(deal["price"])
+                for deal in deals
+                if deal.get("price") is not None
+            ] + [
+                float(offer["price"])
+                for group in groups
+                for offer in (group.get("offers") or [])
+                if offer.get("price") is not None
+            ]
+            web_prices = [
+                float(offer["price"])
+                for offer in web_deals
+                if offer.get("price") is not None
+            ]
+            if (
+                web_prices
+                and catalog_prices
+                and min(web_prices) < min(catalog_prices)
+            ):
+                verdict += " " + _t(language, "web_verdict_note")
             lines += ["", f"<b>{_t(language, 'verdict')}:</b> {verdict}"]
 
     partial = payload.get("partial") or {}

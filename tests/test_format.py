@@ -438,3 +438,39 @@ def test_offer_list_is_numbered_for_track():
 
 def test_empty_offer_list_explains_the_order():
     assert "Zuerst /ask" in format_offer_list([], "de")
+
+
+def test_deal_shows_web_finds_and_a_cheaper_note():
+    payload = {
+        "query": "iphone",
+        "matched": 2,
+        "compared": 2,
+        "deals": [
+            {
+                "product_id": "prod_a",
+                "name": "iPhone 17 Pro",
+                "price": 931,
+                "currency": "EUR",
+                "shop": "Backmarket",
+                "condition": "refurbished",
+                "url": "https://example.com/a",
+                "history": [],
+            }
+        ],
+        "groups": [],
+        "web_deals": [
+            {
+                "title": "Apple iPhone 17 Pro 256 GB",
+                "url": "https://www.mediamarkt.de/x",
+                "price": 869,
+                "currency": "EUR",
+                "shop": "MediaMarkt",
+                "condition": "new",
+            }
+        ],
+    }
+    text = format_deals(payload, "de")
+    assert "Web-Funde (ungeprüft)" in text
+    assert "869 € · MediaMarkt" in text
+    assert "günstigerer Web-Fund" in text
+    assert "/track 1" in text

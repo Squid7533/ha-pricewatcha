@@ -7,13 +7,15 @@ This module fetches those results before the model call:
 - **SearXNG** (JSON) when a self-hosted instance is configured,
 - **DuckDuckGo HTML** otherwise — free, no key, no setup, but brittle.
 
-Only titles, URLs and snippets are returned. Fetching the pages themselves is left for
-a later version; a failed search is an empty list, never an exception that breaks the
-Telegram reply.
+`/ask` gets titles, URLs and snippets. `/deal` additionally fetches the first direct
+shop results and reads their Schema.org Product offer, so a web find carries the shop's
+confirmed price instead of a snippet guess. A failed search is an empty list, never an
+exception that breaks the Telegram reply.
 """
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -23,6 +25,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import aiohttp
+
+from .media import fetch_page_offer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +43,98 @@ _DDG_SNIPPET_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+_PRICE_RE = re.compile(
+    r"(\d{1,4}(?:[.,]\d{3})*(?:[.,]\d{2})?)\s*(?:€|EUR\b|euro\b)",
+    re.IGNORECASE,
+)
+_COMPARISON_HOSTS = (
+    "idealo.",
+    "billiger.",
+    "geizhals.",
+    "preisvergleich.",
+    "guenstiger.",
+    "google.",
+    "chippy.",
+    "priceradar.",
+    "check24.",
+    "sparhandy.",
+)
+_SHOPS = {
+    "mediamarkt.de": "MediaMarkt",
+    "saturn.de": "Saturn",
+    "amazon.de": "Amazon",
+    "otto.de": "Otto",
+    "coolblue.de": "Coolblue",
+    "notebooksbilliger.de": "notebooksbilliger.de",
+    "alternate.de": "Alternate",
+    "cyberport.de": "Cyberport",
+    "conrad.de": "Conrad",
+    "ebay.de": "eBay",
+    "backmarket.de": "Back Market",
+    "asgoodasnew.de": "Asgoodasnew",
+    "rebuy.de": "Rebuy",
+    "shifter.at": "Shifter",
+    "shifter.de": "Shifter",
+}
+
+
+def parse_price(text: str) -> float | None:
+    """First plausible euro amount in a title or snippet."""
+    match = _PRICE_RE.search(text or "")
+    if not match:
+        return None
+    raw = match.group(1).replace(" ", "")
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        left, _, right = raw.partition(",")
+        raw = left + right if len(right) == 3 else f"{left}.{right}"
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def shop_from_url(url: str) -> str:
+    host = urlparse(url).netloc.lower().removeprefix("www.")
+    for domain, name in _SHOPS.items():
+        if host == domain or host.endswith("." + domain):
+            return name
+    return host or "?"
+
+
+def is_comparison_site(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return any(part in host for part in _COMPARISON_HOSTS)
+
+
+@dataclass(slots=True)
+class WebDeal:
+    """A cheaper offer found on the open web, not in the catalog."""
+
+    title: str
+    url: str
+    price: float
+    currency: str
+    shop: str
+    condition: str | None = None
+    snippet: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "price": self.price,
+            "currency": self.currency,
+            "shop": self.shop,
+            "condition": self.condition,
+            "snippet": self.snippet,
+        }
 
 
 @dataclass(slots=True)
@@ -217,3 +313,74 @@ async def search_web(
 
     body = await _fetch_duckduckgo(query, language)
     return parse_duckduckgo(body, limit) if body else []
+
+
+async def find_web_deals(
+    session: aiohttp.ClientSession,
+    query: str,
+    *,
+    max_price: float,
+    provider: str = "duckduckgo",
+    searxng_url: str = "",
+    language: str = "de",
+    limit: int = 3,
+) -> list[WebDeal]:
+    """Search the open web, confirm shop prices and keep plausible offers.
+
+    Search snippets alone rarely contain the price, and comparison sites are not a
+    shop. The first two direct results are fetched and their Schema.org Product offer
+    is used; a snippet price is only a fallback when the page could not be read.
+    """
+    search_query = f"{query} kaufen Preis Angebot"
+    results = await search_web(
+        session,
+        search_query,
+        provider=provider,
+        searxng_url=searxng_url,
+        limit=8,
+        language=language,
+    )
+    direct = [result for result in results if not is_comparison_site(result.url)][:3]
+    pages = await asyncio.gather(
+        *(fetch_page_offer(result.url, query) for result in direct),
+        return_exceptions=True,
+    )
+    minimum = max_price * 0.35
+    deals: list[WebDeal] = []
+    seen: set[tuple[str, int]] = set()
+    for result, page in zip(direct, pages):
+        price = None
+        currency = "EUR"
+        title = result.title
+        url = result.url
+        condition = None
+        if page is not None and not isinstance(page, BaseException):
+            price = page.price
+            currency = page.currency or "EUR"
+            title = page.title or title
+            url = page.url or url
+            condition = page.condition
+        if price is None:
+            price = parse_price(f"{result.title} {result.snippet}")
+        if price is None or not (minimum <= price <= max_price):
+            continue
+        shop = shop_from_url(url)
+        signature = (shop, int(round(price)))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deals.append(
+            WebDeal(
+                title=title,
+                url=url,
+                price=price,
+                currency=currency,
+                shop=shop,
+                condition=condition,
+                snippet=result.snippet,
+            )
+        )
+        if len(deals) >= limit:
+            break
+    deals.sort(key=lambda deal: deal.price)
+    return deals

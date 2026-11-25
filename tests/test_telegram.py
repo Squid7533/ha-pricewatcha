@@ -311,11 +311,18 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def make_frontend(hass=None, min_drop=2.0, advisor=None, photos=False):
+async def make_frontend(
+    hass=None, min_drop=2.0, advisor=None, photos=False, web_search=False
+):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
     frontend = TelegramFrontend(
-        hass, coordinator, min_drop, advisor=advisor, photos=photos
+        hass,
+        coordinator,
+        min_drop,
+        advisor=advisor,
+        photos=photos,
+        web_search=web_search,
     )
     await frontend.async_start()
     return hass, coordinator, frontend
@@ -1456,5 +1463,45 @@ def test_natural_language_drop_only_clears_the_value():
                 },
             )
         ]
+
+    run(scenario())
+
+
+def test_deal_includes_cheaper_web_finds_and_track_uses_them(monkeypatch):
+    import custom_components.pricewatcha.telegram as telegram_module
+    from custom_components.pricewatcha.websearch import WebDeal
+
+    async def fake_find(session, query, **kwargs):
+        return [
+            WebDeal(
+                title="Apple iPhone 17 Pro 256 GB",
+                url="https://www.mediamarkt.de/de/product/x",
+                price=869,
+                currency="EUR",
+                shop="MediaMarkt",
+                condition="new",
+            )
+        ]
+
+    monkeypatch.setattr(telegram_module, "find_web_deals", fake_find)
+
+    async def scenario():
+        hass, coordinator, _ = await make_frontend(web_search=True)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/deal", "args": ["iphone", "17", "pro"]},
+        )
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "Web finds (unverified)" in message
+        assert "869 € · MediaMarkt · new" in message
+        assert "/track 1" in message
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["1"]}
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.tracked == ["https://www.mediamarkt.de/de/product/x"]
 
     run(scenario())

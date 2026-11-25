@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .media import ProductMedia, fetch_product_media
+from .websearch import find_web_deals
 from .const import (
     CONVERSATION_HISTORY_MAX,
     CONVERSATION_STORAGE_KEY,
@@ -139,6 +140,9 @@ class TelegramFrontend:
         language: str | None = None,
         photos: bool = False,
         conversation_ttl_days: int = DEFAULT_CONVERSATION_TTL_DAYS,
+        web_search: bool = False,
+        search_provider: str = "duckduckgo",
+        searxng_url: str = "",
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
@@ -146,6 +150,9 @@ class TelegramFrontend:
         self._advisor = advisor
         self._photos = photos
         self._memory_ttl = max(1, int(conversation_ttl_days)) * 24 * 3600
+        self._web_search = web_search
+        self._search_provider = search_provider
+        self._searxng_url = searxng_url
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
@@ -960,6 +967,32 @@ class TelegramFrontend:
         # With AI on, the assessment is the verdict; keeping both duplicated (and
         # sometimes contradicted) the recommendation. If it fails, the verdict is
         # sent as its own short message below.
+        if self._web_search and payload.get("deals"):
+            prices = [
+                float(deal["price"])
+                for deal in payload["deals"]
+                if deal.get("price") is not None
+            ]
+            for group in payload.get("groups") or []:
+                for offer in group.get("offers") or []:
+                    if offer.get("price") is not None:
+                        prices.append(float(offer["price"]))
+            if prices:
+                try:
+                    web_deals = await find_web_deals(
+                        async_get_clientsession(self.hass),
+                        str(payload.get("query") or ""),
+                        max_price=min(prices) * 1.35,
+                        provider=self._search_provider,
+                        searxng_url=self._searxng_url,
+                        language=self._language,
+                    )
+                except Exception:  # noqa: BLE001 - catalog answer stands alone
+                    _LOGGER.debug("Web deal search failed", exc_info=True)
+                    web_deals = []
+                if web_deals:
+                    payload["web_deals"] = [deal.to_dict() for deal in web_deals]
+
         await self._async_send(
             chat_id,
             format_deals(payload, self._language, include_verdict=not ai_active),
@@ -970,6 +1003,12 @@ class TelegramFrontend:
         self._last_assessments.pop(chat_id, None)
         self._last_history[chat_id] = []
         self._last_offers.pop(chat_id, None)
+        if payload.get("web_deals"):
+            self._last_offers[chat_id] = [
+                {"url": str(deal["url"]), "title": str(deal.get("title") or "?")}
+                for deal in payload["web_deals"]
+                if str(deal.get("url") or "").startswith("http")
+            ]
         self._store_product_context(chat_id, payload.get("deals") or [])
         self._touch_memory(chat_id)
         await self._async_send_photo(chat_id, payload)

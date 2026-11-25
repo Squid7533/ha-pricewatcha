@@ -9,6 +9,7 @@ from custom_components.pricewatcha.websearch import (
     SearchResult,
     build_query,
     parse_duckduckgo,
+    parse_price,
     parse_searxng,
     search_web,
 )
@@ -149,3 +150,10 @@ def test_no_provider_and_empty_query_are_no_ops():
     assert asyncio.run(search_web(session, "", provider="duckduckgo")) == []
     assert asyncio.run(search_web(session, "x", provider="none")) == []
     assert session.calls == []
+
+
+def test_parse_price_handles_german_and_plain_formats():
+    assert parse_price("Apple iPhone Air ab 899,00 €") == 899.0
+    assert parse_price("nur 1.128,99 EUR") == 1128.99
+    assert parse_price("799 €") == 799.0
+    assert parse_price("kein Preis") is None
