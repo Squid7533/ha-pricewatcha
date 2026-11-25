@@ -324,7 +324,7 @@ track_offer:
 
 untrack_offer:
   name: Stop tracking a web offer
-  description: Remove a stored web offer and stop its refresh.
+  description: Remove a stored web offer and stop its refresh. An offer created with /track also stops its Pricewatcha watch, removing the matching sensor.
   fields:
     offer_id:
       required: true

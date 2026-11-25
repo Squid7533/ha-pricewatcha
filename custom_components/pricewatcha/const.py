@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.10.0"
+VERSION: Final = "0.11.0"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -31,6 +31,11 @@ MIN_CONVERSATION_TTL_DAYS: Final = 3
 MAX_CONVERSATION_TTL_DAYS: Final = 7
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 1440
+
+# The watchlist endpoint caps a page at 200 rows. Reading every page keeps the
+# sensor reconciliation from deleting sensors for products on later pages.
+WATCHLIST_PAGE_SIZE: Final = 200
+WATCHLIST_MAX_PAGES: Final = 10
 
 PLATFORMS: Final = ["sensor"]
 

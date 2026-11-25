@@ -18,7 +18,14 @@ from .api import (
     PricewatchaRateLimitError,
 )
 from .best_deal import find_best_deals
-from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN, EVENT_PRICE_CHANGED
+from .const import (
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    EVENT_PRICE_CHANGED,
+    WATCHLIST_MAX_PAGES,
+    WATCHLIST_PAGE_SIZE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +46,7 @@ class PricewatchaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         try:
-            items = await self.client.watchlist()
+            items = await self._async_watchlist()
         except PricewatchaAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except PricewatchaRateLimitError as err:
@@ -57,6 +64,24 @@ class PricewatchaCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         self._fire_price_changes(products)
         return products
+
+    async def _async_watchlist(self) -> list[dict[str, Any]]:
+        """Read every watchlist page.
+
+        The endpoint returns at most 200 rows; reading only the first page would make
+        the sensor reconciliation treat every product beyond it as unwatched and
+        delete its sensor. The page cap is a guard against a broken API that keeps
+        answering full pages.
+        """
+        items: list[dict[str, Any]] = []
+        for page in range(WATCHLIST_MAX_PAGES):
+            batch = await self.client.watchlist(
+                limit=WATCHLIST_PAGE_SIZE, offset=page * WATCHLIST_PAGE_SIZE
+            )
+            items.extend(batch)
+            if len(batch) < WATCHLIST_PAGE_SIZE:
+                break
+        return items
 
     def _fire_price_changes(self, products: dict[str, dict[str, Any]]) -> None:
         """Announce genuinely changed prices; the first poll has no baseline."""

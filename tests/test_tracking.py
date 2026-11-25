@@ -23,6 +23,10 @@ class MemoryStore:
 
 
 class FakeClient:
+    def __init__(self):
+        self.unwatched = []
+        self.watchlist_items = []
+
     async def product(self, product_id):
         return {
             "product_id": product_id,
@@ -31,6 +35,13 @@ class FakeClient:
             "currency": "EUR",
             "product_url": "https://shop.example/catalog",
         }
+
+    async def unwatch(self, product_id):
+        self.unwatched.append(product_id)
+        return {"product_id": product_id, "watching": False}
+
+    async def watchlist(self, limit=200, offset=0):
+        return self.watchlist_items[offset : offset + limit]
 
 
 def run(coro):
@@ -226,5 +237,139 @@ def test_restart_does_not_repeat_a_target_notification(monkeypatch):
         restarted._notify = notify
         assert await restarted.async_refresh(offer["id"]) is None
         assert len(notifications) == 1
+
+    run(scenario())
+
+
+class FakeCoordinator:
+    def __init__(self):
+        self.refreshes = 0
+
+    async def async_request_refresh(self):
+        self.refreshes += 1
+
+
+def test_removing_a_tracked_offer_stops_its_pricewatcha_watch():
+    store = MemoryStore()
+    client = FakeClient()
+    coordinator = FakeCoordinator()
+
+    async def scenario():
+        manager = TrackedOfferManager(
+            None, client, store=store, coordinator=coordinator
+        )
+        await manager.async_load()
+        offer, _ = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+            product_id="prod_a",
+            watched=True,
+        )
+        assert await manager.async_remove(offer["id"], 1) is True
+
+        assert client.unwatched == ["prod_a"]
+        assert coordinator.refreshes == 1
+        assert manager.list(1) == []
+
+    run(scenario())
+
+
+def test_service_added_offer_does_not_unwatch_the_product():
+    store = MemoryStore()
+    client = FakeClient()
+
+    async def scenario():
+        manager = TrackedOfferManager(None, client, store=store)
+        await manager.async_load()
+        offer, _ = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+            watched=False,
+        )
+        assert await manager.async_remove(offer["id"], 1) is True
+        assert client.unwatched == []
+
+    run(scenario())
+
+
+def test_removing_an_old_offer_finds_the_watched_product_by_url():
+    store = MemoryStore()
+    client = FakeClient()
+    client.watchlist_items = [
+        {
+            "product_id": "prod_a",
+            "product": {
+                "product_id": "prod_a",
+                "product_url": "https://shop.example/p?utm_source=telegram",
+            },
+        }
+    ]
+    coordinator = FakeCoordinator()
+
+    async def scenario():
+        manager = TrackedOfferManager(
+            None, client, store=store, coordinator=coordinator
+        )
+        await manager.async_load()
+        # A record stored before 0.11 has neither product_id nor watched.
+        offer, _ = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p/",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+        )
+        offer.pop("watched", None)
+        offer.pop("product_id", None)
+        assert await manager.async_remove(offer["id"], 1) is True
+
+        assert client.unwatched == ["prod_a"]
+        assert coordinator.refreshes == 1
+
+    run(scenario())
+
+
+def test_tracking_the_same_url_again_records_the_watch():
+    store = MemoryStore()
+    client = FakeClient()
+
+    async def scenario():
+        manager = TrackedOfferManager(None, client, store=store)
+        await manager.async_load()
+        offer, _ = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+            watched=False,
+        )
+        same, created = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+            product_id="prod_a",
+            watched=True,
+        )
+        assert created is False
+        assert same["id"] == offer["id"]
+        assert same["watched"] is True
+        assert same["product_id"] == "prod_a"
+
+        assert await manager.async_remove(same["id"], 1) is True
+        assert client.unwatched == ["prod_a"]
 
     run(scenario())

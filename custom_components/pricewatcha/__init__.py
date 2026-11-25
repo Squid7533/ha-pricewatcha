@@ -42,7 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
     await coordinator.async_config_entry_first_refresh()
 
     ai_config = AIConfig.from_options(entry.options)
-    tracker = TrackedOfferManager(hass, client)
+    tracker = TrackedOfferManager(hass, client, coordinator=coordinator)
     # Commands and price-drop pushes work as soon as the Telegram bot integration
     # exists; until then the listener is idle and costs nothing.
     frontend = TelegramFrontend(

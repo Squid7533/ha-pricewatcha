@@ -12,7 +12,10 @@ the account features (watchlist, price alerts) need a free
 ## What you get
 
 - **One sensor per watched product** — current price (monetary, statistics-friendly) plus
-  shop, product URL, status, last checked and watched-at as attributes.
+  shop, product URL, status, condition (new / very good / refurbished / used, from the
+  product name or URL slug), last checked and watched-at as attributes. The sensor list
+  mirrors the Pricewatcha watchlist: unwatching a product removes its sensor and device,
+  and a poll that no longer returns a product removes it too.
 - **`best_deal`** — search, drop accessories, compare each candidate against its *own*
   price history, and group the offers by capacity and condition (very good / like new /
   new), so "is it worth paying more?" has a data-backed answer.
@@ -58,7 +61,7 @@ lives in **Configure** on the integration.
 | `pricewatcha.price_history` | Low/high/average/trend for one `product_id` |
 | `pricewatcha.track` | Submit a product URL; `watch: true` keeps it |
 | `pricewatcha.track_offer` | Store a web offer for refresh, snapshots and alerts |
-| `pricewatcha.untrack_offer` | Remove a stored web offer |
+| `pricewatcha.untrack_offer` | Remove a stored web offer; a `/track`ed URL also stops its Pricewatcha watch and removes its sensor |
 | `pricewatcha.list_tracked_offers` | List stored web offers with last price and alert state |
 | `pricewatcha.offer_history` | One tracked offer including its snapshots |
 | `pricewatcha.create_offer_alert` / `.delete_offer_alert` | Target/any-drop alert on a tracked web offer |
@@ -181,7 +184,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/track` | watchlist + tracked web offers, one numbered list |
 | `/track 1` | track the first result from the last `/deal` or `/ask` |
 | `/track <url>` | track a URL, watch it, and store it for history/alerts |
-| `/track remove 1` | remove a catalog or web entry |
+| `/track remove 1` | remove a catalog or web entry, including its watch and sensor |
 | `/track history 1` | history for a catalog product or tracked web offer |
 | `/track info 1` | details for a catalog product or tracked web offer |
 | `/track alert 1 target 700` | target or any-drop alert for a tracked web offer |
@@ -299,7 +302,9 @@ alerts survive Home Assistant restarts.
 - A target alert fires once at/below the target and again only on a **further** drop.
 - Any-drop alerts fire once per new lower price.
 - `last_notified_total` is stored, so a restart does not repeat the same notification.
-- `/track remove 1` removes the offer and stops its refreshes.
+- `/track remove 1` removes the offer and stops its refreshes. For a URL tracked with
+  `/track <url>` it also stops the Pricewatcha watch, so the matching sensor and device
+  disappear from Home Assistant. Removing a catalog entry unwatches it the same way.
 - Catalog products keep using Pricewatcha watch internally; `/track` on a catalog result
   falls back to that watch.
 - The 60-minute refresh is deliberately conservative; shop pages can block a refresh, in

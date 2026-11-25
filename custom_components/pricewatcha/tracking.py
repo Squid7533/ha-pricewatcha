@@ -12,11 +12,13 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
+from .const import WATCHLIST_MAX_PAGES, WATCHLIST_PAGE_SIZE
 from .media import fetch_page_offer
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +42,15 @@ def _float(value: Any) -> float | None:
         return None
 
 
+def _canonical_url(url: str) -> str:
+    """Compare shop URLs without tracking parameters or a trailing slash."""
+    try:
+        parts = urlsplit(str(url or "").strip())
+    except ValueError:
+        return str(url or "").strip().casefold()
+    return f"{parts.netloc.casefold()}{parts.path.rstrip('/').casefold()}"
+
+
 class TrackedOfferManager:
     """Store, refresh and alert on external offers."""
 
@@ -50,6 +61,7 @@ class TrackedOfferManager:
         *,
         refresh_minutes: int = DEFAULT_REFRESH_MINUTES,
         store: Store | None = None,
+        coordinator: Any | None = None,
     ) -> None:
         self.hass = hass
         self.client = client
@@ -59,6 +71,9 @@ class TrackedOfferManager:
         self._notify: NotifyCallback | None = None
         self._task: asyncio.Task | None = None
         self._save_lock = asyncio.Lock()
+        # Refreshed after a removal that also stopped a Pricewatcha watch, so the
+        # sensor disappears at once instead of on the next scheduled poll.
+        self.coordinator = coordinator
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -139,9 +154,23 @@ class TrackedOfferManager:
         query: str = "",
         target_total: float | None = None,
         notify_on_drop: bool = False,
+        product_id: str | None = None,
+        watched: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         existing = self.find(chat_id, url)
         if existing is not None:
+            # A record may predate /track <url> claiming its watch (or have been
+            # created by the service without one). Record the ownership now, so a
+            # later removal can undo the watch it did not know about yet.
+            changed = False
+            if watched and existing.get("watched") is not True:
+                existing["watched"] = True
+                changed = True
+            if product_id and not existing.get("product_id"):
+                existing["product_id"] = str(product_id)
+                changed = True
+            if changed:
+                await self._async_save()
             return existing, False
         offer_id = uuid4().hex[:8]
         total = round(float(price), 2) if price is not None else None
@@ -167,6 +196,10 @@ class TrackedOfferManager:
             "last_notified_total": None,
             "last_notified_at": None,
             "last_error": None,
+            # The catalog id and whether this record owns a Pricewatcha watch. Both
+            # are needed to undo a /track <url>, which watches the product too.
+            "product_id": str(product_id) if product_id else None,
+            "watched": bool(watched),
             "snapshots": [
                 {"at": created, "price": _float(price), "total": total, "available": True}
             ],
@@ -179,9 +212,75 @@ class TrackedOfferManager:
         offer = self.get(offer_id, chat_id)
         if offer is None:
             return False
+        unwatched = await self._async_unwatch(offer)
         offer["active"] = False
         await self._async_save()
+        if unwatched and self.coordinator is not None:
+            await self.coordinator.async_request_refresh()
         return True
+
+    async def _async_unwatch(self, offer: dict[str, Any]) -> bool:
+        """Stop the Pricewatcha watch behind a tracked offer, if it made one.
+
+        Records added through ``/track <url>`` watched the product on the
+        Pricewatcha side, which is what created the Home Assistant sensor. Removing
+        only the local record would leave that sensor behind. Offers added through
+        the service carry ``watched: false`` and never touch the watchlist.
+        """
+        if offer.get("watched") is False:
+            return False
+        product_id = str(offer.get("product_id") or "")
+        if not product_id and str(offer.get("source") or "") == "web":
+            product_id = await self._async_watched_product_id(
+                str(offer.get("url") or "")
+            )
+        if not product_id:
+            return False
+        try:
+            await self.client.unwatch(product_id)
+        except Exception as err:  # noqa: BLE001 - the local record is still removed
+            _LOGGER.warning(
+                "Could not stop watching %s while removing tracked offer %s: %s",
+                product_id,
+                offer.get("id"),
+                err,
+            )
+            return False
+        return True
+
+    async def _async_watched_product_id(self, url: str) -> str | None:
+        """Find the watched product with this URL, for records stored before 0.11."""
+        target = _canonical_url(url)
+        if not target:
+            return None
+        # The coordinator already holds the current watchlist; only fall back to an
+        # API read when it has not caught up yet.
+        known = getattr(self.coordinator, "data", None) or {}
+        for product_id, product in known.items():
+            if _canonical_url(str(product.get("product_url") or "")) == target:
+                return str(product_id)
+        try:
+            items: list[dict[str, Any]] = []
+            for page in range(WATCHLIST_MAX_PAGES):
+                batch = await self.client.watchlist(
+                    limit=WATCHLIST_PAGE_SIZE, offset=page * WATCHLIST_PAGE_SIZE
+                )
+                items.extend(batch)
+                if len(batch) < WATCHLIST_PAGE_SIZE:
+                    break
+        except Exception:  # noqa: BLE001 - a failed lookup only skips the unwatch
+            _LOGGER.debug("Could not read the watchlist", exc_info=True)
+            return None
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            product = item.get("product") if isinstance(item.get("product"), dict) else {}
+            if _canonical_url(str(product.get("product_url") or "")) != target:
+                continue
+            product_id = product.get("product_id") or item.get("product_id")
+            if product_id:
+                return str(product_id)
+        return None
 
     async def async_set_alert(
         self,

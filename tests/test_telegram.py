@@ -156,7 +156,12 @@ class FakeClient:
         self.tracked.append(url)
         return {
             "status": "completed",
-            "product": {"name": "iPhone 15 Pro", "current_price": 489, "currency": "EUR"},
+            "product": {
+                "product_id": "prod_tracked",
+                "name": "iPhone 15 Pro",
+                "current_price": 489,
+                "currency": "EUR",
+            },
         }
 
     async def watch(self, product_id):
@@ -289,6 +294,8 @@ class FakeTracker:
         query="",
         target_total=None,
         notify_on_drop=False,
+        product_id=None,
+        watched=False,
     ):
         existing = self.find(chat_id, url)
         if existing:
@@ -308,6 +315,8 @@ class FakeTracker:
             "condition": condition,
             "target_total": target_total,
             "notify_on_drop": notify_on_drop,
+            "product_id": product_id,
+            "watched": watched,
             "active": True,
             "snapshots": [{"at": "2026-11-25T10:00:00+00:00", "total": price}],
         }

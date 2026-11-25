@@ -1352,7 +1352,12 @@ class TelegramFrontend:
             if not product_id:
                 await self._async_send(chat_id, format_ref_not_found(self._language))
                 return
-            await self._coordinator.client.unwatch(product_id)
+            try:
+                await self._coordinator.client.unwatch(product_id)
+            except Exception as err:  # noqa: BLE001 - the sensor must stay in sync
+                _LOGGER.debug("unwatch failed", exc_info=True)
+                await self._async_send(chat_id, self._error_text(err))
+                return
             await self._coordinator.async_request_refresh()
             await self._async_send(
                 chat_id,
@@ -1507,6 +1512,11 @@ class TelegramFrontend:
                     query=str(
                         (self._last_deals.get(chat_id) or {}).get("query") or ""
                     ),
+                    # client.track(watch=True) puts the product on the watchlist,
+                    # which is what creates its sensor. Remember both so
+                    # /track remove can undo the watch again.
+                    product_id=str(product.get("product_id") or "") or None,
+                    watched=True,
                 )
             except Exception:  # noqa: BLE001 - Pricewatcha track still succeeded
                 _LOGGER.debug("Could not persist tracked offer", exc_info=True)
