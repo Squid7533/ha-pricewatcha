@@ -10,7 +10,9 @@ from .ai import AIAdvisor, AIConfig
 from .api import PricewatchaClient
 from .const import (
     CONF_COMPARISON_PORTALS,
+    CONF_GEIZHALS,
     DEFAULT_COMPARISON_PORTALS,
+    DEFAULT_GEIZHALS,
     CONF_API_KEY,
     CONF_TELEGRAM_MIN_DROP,
     CONF_CONVERSATION_TTL_DAYS,
@@ -63,6 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
                 CONF_COMPARISON_PORTALS, DEFAULT_COMPARISON_PORTALS
             )
         ),
+        geizhals=bool(entry.options.get(CONF_GEIZHALS, DEFAULT_GEIZHALS)),
     )
     await frontend.async_start()
 

@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 162 tests pass.
+breaks the deterministic reply; 171 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,7 +140,7 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 162 tests pass.
+blocked shop sends no photo and no error; 171 tests pass.
 
 ## 3d — conversation memory (done in 0.4.5)
 
@@ -162,7 +162,7 @@ conversation.
 **Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
 it and `/ask` asks for a new `/deal`; entries older than the configured 3–7 days are
 ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
-162 tests pass.
+171 tests pass.
 
 ## Release plan
 
@@ -211,3 +211,17 @@ ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
   low.
 - Rendered as a separate unverified block; not trackable, no shop, shipping excluded.
 - Off by default because markup and bot protection can change; a failed fetch omits it.
+
+
+## After phase 3 — 0.8.0 free-source offer engine
+
+- `offers.py`: normalized `Offer` and `OfferSet` with condition normalization, product
+  keys, dedupe by product/shop/condition and best-by-condition ranking.
+- `sources.py`: pure adapters for Pricewatcha catalog deals, direct shop offers, and
+  idealo/Geizhals aggregates.
+- `deal_engine` wiring in `/deal`: best-offer block, source status, AI context.
+- Geizhals adapter reads the Open Graph title (`ab € 799,00`) without login; optional
+  toggle, default on.
+- `/track` falls back to the first normalized catalog offer when no web find exists;
+  aggregate comparison rows explain that they are not trackable.
+- 171 tests.

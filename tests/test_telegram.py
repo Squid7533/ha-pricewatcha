@@ -318,6 +318,7 @@ async def make_frontend(
     photos=False,
     web_search=False,
     comparison_portals=False,
+    geizhals=False,
 ):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
@@ -329,6 +330,7 @@ async def make_frontend(
         photos=photos,
         web_search=web_search,
         comparison_portals=comparison_portals,
+        geizhals=geizhals,
     )
     await frontend.async_start()
     return hass, coordinator, frontend
@@ -1541,5 +1543,53 @@ def test_deal_includes_idealo_comparison_when_enabled(monkeypatch):
         assert "new from" in message
         assert "230 offers" in message
         assert "B-Ware/used from 899 €" in message
+
+    run(scenario())
+
+
+def test_deal_engine_track_selects_the_catalog_offer_when_no_web_find_exists():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/deal", "args": ["iphone", "17", "pro"]},
+        )
+        await asyncio.sleep(0.05)
+        assert "Best offers" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["1"]}
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.watched == ["prod_a"]
+
+    run(scenario())
+
+
+def test_deal_engine_lists_geizhals_when_enabled(monkeypatch):
+    import custom_components.pricewatcha.telegram as telegram_module
+    from custom_components.pricewatcha.websearch import ComparisonDeal
+
+    async def fake_geizhals(session, query, **kwargs):
+        return ComparisonDeal(
+            title="Apple iPhone 17 Pro",
+            url="https://geizhals.de/apple-iphone-17-pro-v1.html",
+            source="geizhals",
+            new_price=1088.65,
+        )
+
+    monkeypatch.setattr(telegram_module, "find_geizhals_comparison", fake_geizhals)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(geizhals=True)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/deal", "args": ["iphone", "17", "pro"]},
+        )
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "Geizhals" in message or "geizhals" in message
+        assert "1 088.65" in message or "1088.65" in message
 
     run(scenario())

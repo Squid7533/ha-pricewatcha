@@ -1,8 +1,8 @@
 # Roadmap 0.8.0 and 0.9.0 — free-source deal engine and universal tracker
 
-Status: plan only. 0.8.0 and 0.9.0 are started separately as goal rounds.
+Status: 0.8.0 implemented in v0.8.0. 0.9.0 remains planned; start it as a separate goal round.
 
-Baseline: 0.7.0, 162 tests.
+Baseline: 0.7.0, 162 tests; 0.8.0 adds 9 tests (171 total).
 
 ## Goal
 
@@ -180,11 +180,11 @@ Acceptance:
 
 ## 0.8.0 release criteria
 
-- [ ] Offer model and source contract merged.
-- [ ] Pricewatcha, web shops, idealo and Geizhals adapters.
-- [ ] Condition-aware `/deal` output.
-- [ ] `/track` selects any trackable offer.
-- [ ] Tests, docs, HACS release.
+- [x] Offer model and source contract merged.
+- [x] Pricewatcha, web shops, idealo and Geizhals adapters.
+- [x] Condition-aware `/deal` output.
+- [x] `/track` selects any trackable offer (catalog fallback + web; aggregates explain they are not trackable).
+- [x] Tests, docs, HACS release.
 
 ---
 

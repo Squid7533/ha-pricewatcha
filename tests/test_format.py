@@ -512,3 +512,48 @@ def test_deal_shows_idealo_comparison_with_used_price():
     assert "B-Ware/Gebraucht ab 639,13 €" in text
     assert "28 Angebote" in text
     assert "günstigerer Vergleichspreis" in text
+
+
+def test_deal_shows_best_offer_by_condition():
+    payload = {
+        "query": "iphone air",
+        "matched": 1,
+        "compared": 1,
+        "deals": [
+            {
+                "product_id": "prod_a",
+                "name": "iPhone Air",
+                "price": 669,
+                "currency": "EUR",
+                "shop": "Asgoodasnew",
+                "condition": "very good",
+                "url": "https://example.com/a",
+                "history": [],
+            }
+        ],
+        "groups": [],
+        "best_by_condition": [
+            {
+                "condition": "new",
+                "offer": {
+                    "price": 799,
+                    "currency": "EUR",
+                    "shop": "MediaMarkt",
+                    "shipping_known": False,
+                },
+            },
+            {
+                "condition": "refurbished",
+                "offer": {
+                    "price": 669,
+                    "currency": "EUR",
+                    "shop": "Asgoodasnew",
+                    "shipping_known": True,
+                },
+            },
+        ],
+    }
+    text = format_deals(payload, "de")
+    assert "Beste Angebote" in text
+    assert "Bester Neupreis: <b>799 € · MediaMarkt · zzgl. Versand</b>" in text
+    assert "Bester Refurbished-Preis: <b>669 € · Asgoodasnew</b>" in text

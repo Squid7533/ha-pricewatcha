@@ -22,7 +22,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .media import ProductMedia, fetch_product_media
-from .websearch import find_idealo_comparison, find_web_deals
+from .sources import build_offer_view
+from .websearch import (
+    find_geizhals_comparison,
+    find_idealo_comparison,
+    find_web_deals,
+)
 from .const import (
     CONVERSATION_HISTORY_MAX,
     CONVERSATION_STORAGE_KEY,
@@ -42,6 +47,7 @@ from .format import (
     format_alert_not_found,
     format_alert_updated,
     format_history,
+    format_not_trackable,
     format_offer_list,
     format_product,
     format_ref_not_found,
@@ -144,6 +150,7 @@ class TelegramFrontend:
         search_provider: str = "duckduckgo",
         searxng_url: str = "",
         comparison_portals: bool = False,
+        geizhals: bool = False,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
@@ -155,6 +162,7 @@ class TelegramFrontend:
         self._search_provider = search_provider
         self._searxng_url = searxng_url
         self._comparison_portals = comparison_portals
+        self._geizhals = geizhals
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
@@ -969,22 +977,25 @@ class TelegramFrontend:
         # With AI on, the assessment is the verdict; keeping both duplicated (and
         # sometimes contradicted) the recommendation. If it fails, the verdict is
         # sent as its own short message below.
+        web_deals: list[Any] = []
+        comparisons: list[Any] = []
+        prices = [
+            float(deal["price"])
+            for deal in payload.get("deals") or []
+            if deal.get("price") is not None
+        ]
+        for group in payload.get("groups") or []:
+            for offer in group.get("offers") or []:
+                if offer.get("price") is not None:
+                    prices.append(float(offer["price"]))
+        catalog_best = min(prices) if prices else None
         if self._web_search and payload.get("deals"):
-            prices = [
-                float(deal["price"])
-                for deal in payload["deals"]
-                if deal.get("price") is not None
-            ]
-            for group in payload.get("groups") or []:
-                for offer in group.get("offers") or []:
-                    if offer.get("price") is not None:
-                        prices.append(float(offer["price"]))
-            if prices:
+            if catalog_best is not None:
                 try:
                     web_deals = await find_web_deals(
                         async_get_clientsession(self.hass),
                         str(payload.get("query") or ""),
-                        max_price=min(prices) * 1.35,
+                        max_price=catalog_best * 1.35,
                         provider=self._search_provider,
                         searxng_url=self._searxng_url,
                         language=self._language,
@@ -1006,8 +1017,30 @@ class TelegramFrontend:
             except Exception:  # noqa: BLE001 - the catalog answer stands alone
                 _LOGGER.debug("Comparison lookup failed", exc_info=True)
                 comparison = None
-            if comparison is not None:
-                payload["comparisons"] = [comparison.to_dict()]
+            if comparison is not None and _comparison_in_range(
+                comparison, catalog_best
+            ):
+                comparisons.append(comparison.to_dict())
+        if self._geizhals and payload.get("deals"):
+            try:
+                geizhals = await find_geizhals_comparison(
+                    async_get_clientsession(self.hass),
+                    str(payload.get("query") or ""),
+                    provider=self._search_provider,
+                    searxng_url=self._searxng_url,
+                    language=self._language,
+                )
+            except Exception:  # noqa: BLE001 - the catalog answer stands alone
+                _LOGGER.debug("Geizhals lookup failed", exc_info=True)
+                geizhals = None
+            if geizhals is not None and _comparison_in_range(
+                geizhals, catalog_best
+            ):
+                comparisons.append(geizhals.to_dict())
+        if comparisons:
+            payload["comparisons"] = comparisons
+        if payload.get("deals"):
+            build_offer_view(payload, web_deals, comparisons)
 
         await self._async_send(
             chat_id,
@@ -1141,17 +1174,53 @@ class TelegramFrontend:
         language = self._language
         raw = args[0].strip() if args else ""
         if not raw:
+            offers = self._last_offers.get(chat_id, [])
+            if not offers:
+                payload = self._last_deals.get(chat_id) or {}
+                offers = [
+                    {
+                        "url": str(offer.get("url") or ""),
+                        "title": str(offer.get("title") or "?"),
+                    }
+                    for offer in (payload.get("offers") or [])
+                    if isinstance(offer, dict)
+                    and offer.get("trackable")
+                    and str(offer.get("url") or "").startswith("http")
+                ]
             await self._async_send(
-                chat_id, format_offer_list(self._last_offers.get(chat_id, []), language)
+                chat_id, format_offer_list(offers, language)
             )
             return
         if raw.isdigit():
             offers = self._last_offers.get(chat_id, [])
             index = int(raw) - 1
-            if index < 0 or index >= len(offers):
-                await self._async_send(chat_id, format_offer_list(offers, language))
-                return
-            url = offers[index]["url"]
+            if 0 <= index < len(offers):
+                url = offers[index]["url"]
+            else:
+                payload = self._last_deals.get(chat_id) or {}
+                engine_offers = [
+                    offer
+                    for offer in (payload.get("offers") or [])
+                    if isinstance(offer, dict)
+                ]
+                if index < 0 or index >= len(engine_offers):
+                    await self._async_send(
+                        chat_id, format_offer_list(offers, language)
+                    )
+                    return
+                offer = engine_offers[index]
+                if offer.get("source") == "web" and str(offer.get("url") or "").startswith("http"):
+                    url = str(offer["url"])
+                elif offer.get("product_id") or offer.get("source_id"):
+                    await self._async_watch(
+                        chat_id, str(offer.get("product_id") or offer.get("source_id"))
+                    )
+                    return
+                else:
+                    await self._async_send(
+                        chat_id, format_not_trackable(language)
+                    )
+                    return
         elif raw.startswith("http"):
             url = raw
         else:
@@ -1665,3 +1734,22 @@ _ACTION_WORDS = (
 def _looks_like_action(text: str) -> bool:
     lowered = text.casefold()
     return any(word in lowered for word in _ACTION_WORDS)
+
+
+def _comparison_in_range(comparison, catalog_best: float | None) -> bool:
+    """Keep an aggregate only when it is comparable to the catalog price."""
+    if catalog_best is None:
+        return True
+    limit = catalog_best * 1.35
+    if isinstance(comparison, dict):
+        new_price = comparison.get("new_price")
+        used_price = comparison.get("used_price")
+    else:
+        new_price = getattr(comparison, "new_price", None)
+        used_price = getattr(comparison, "used_price", None)
+    prices = [
+        float(value)
+        for value in (new_price, used_price)
+        if value is not None
+    ]
+    return bool(prices) and min(prices) <= limit

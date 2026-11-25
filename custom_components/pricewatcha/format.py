@@ -53,6 +53,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "prices_by_condition": "Prices by condition",
         "web_deals_header": "Web finds (unverified)",
         "web_deals_hint": "Web prices are unverified; /track 1 watches one.",
+        "best_offers_header": "Best offers",
+        "best_new": "Best new price",
+        "best_refurbished": "Best refurbished price",
+        "best_used": "Best used price",
+        "best_unknown": "Best price (condition unknown)",
+        "best_plus_shipping": "plus shipping",
+        "best_aggregate_prefix": "from",
         "comparison_header": "Price comparison (unverified)",
         "comparison_new": "new from {price}",
         "comparison_used": "B-Ware/used from {price}",
@@ -127,6 +134,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "offers_header": "Web offers from the last answer:",
         "offers_empty": "No web offers stored. Run /ask first, then /track <number>.",
         "offers_hint": "Watch one with /track <number>, or paste a URL.",
+        "track_not_trackable": "That is an aggregate price, not a shop offer; open the source instead.",
         "today": "today",
     },
     "de": {
@@ -155,6 +163,13 @@ _STRINGS: dict[str, dict[str, str]] = {
         "prices_by_condition": "Preise nach Zustand",
         "web_deals_header": "Web-Funde (ungeprüft)",
         "web_deals_hint": "Web-Preise sind ungeprüft; /track 1 beobachtet eines.",
+        "best_offers_header": "Beste Angebote",
+        "best_new": "Bester Neupreis",
+        "best_refurbished": "Bester Refurbished-Preis",
+        "best_used": "Bester Gebrauchtpreis",
+        "best_unknown": "Bester Preis (Zustand unbekannt)",
+        "best_plus_shipping": "zzgl. Versand",
+        "best_aggregate_prefix": "ab",
         "comparison_header": "Preisvergleich (ungeprüft)",
         "comparison_new": "neu ab {price}",
         "comparison_used": "B-Ware/Gebraucht ab {price}",
@@ -229,6 +244,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "offers_header": "Web-Angebote aus der letzten Antwort:",
         "offers_empty": "Keine Web-Angebote gespeichert. Zuerst /ask ausführen, dann /track <Nummer>.",
         "offers_hint": "Eines mit /track <Nummer> beobachten oder eine URL einfügen.",
+        "track_not_trackable": "Das ist ein Aggregatpreis, kein Shop-Angebot; öffne stattdessen die Quelle.",
         "today": "heute",
     },
 }
@@ -578,6 +594,35 @@ def format_deals(
         counts = _t(language, "compared", compared=compared)
 
     lines = [f"<b>{_esc(query)}</b> — {counts}", ""]
+    best = [
+        item for item in (payload.get("best_by_condition") or []) if isinstance(item, dict)
+    ]
+    if best:
+        labels = {
+            "new": "best_new",
+            "refurbished": "best_refurbished",
+            "used": "best_used",
+            "unknown": "best_unknown",
+        }
+        lines.append(f"<b>{_t(language, 'best_offers_header')}</b>")
+        for item in best:
+            offer = item.get("offer") if isinstance(item, dict) else None
+            if not isinstance(offer, dict) or offer.get("price") is None:
+                continue
+            label = _t(language, labels.get(str(item.get("condition")), "best_unknown"))
+            prefix = ""
+            extra = offer.get("extra") or {}
+            if isinstance(extra, dict) and extra.get("aggregate"):
+                prefix = f"{_t(language, 'best_aggregate_prefix')} "
+            detail = (
+                f"{prefix}{_money(offer.get('price'), offer.get('currency'), language)}"
+                f" · {_esc(offer.get('shop') or '?')}"
+            )
+            if not offer.get("shipping_known"):
+                detail += f" · {_t(language, 'best_plus_shipping')}"
+            lines.append(f"{label}: <b>{detail}</b>")
+        lines.append("")
+
     for index, deal in enumerate(deals, start=1):
         lines.extend(_deal_lines(index, deal, language))
         if index < len(deals):
@@ -644,7 +689,7 @@ def format_deals(
                     ),
                 )
             )
-        label = "idealo"
+        label = _esc(str(comparison.get("source") or "idealo"))
         if url.startswith("http"):
             lines.append(
                 f'<a href="{_esc_attr(url)}">{label}</a>: ' + " · ".join(parts)
@@ -1132,3 +1177,7 @@ def format_chat_reply(text: str, language: str = "de") -> str:
 
 def format_action_error(reason: str, language: str = "de") -> str:
     return format_ai_unavailable(reason, language)
+
+
+def format_not_trackable(language: str = "en") -> str:
+    return _t(language, "track_not_trackable")

@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "pricewatcha"
 NAME: Final = "Pricewatcha"
-VERSION: Final = "0.7.0"
+VERSION: Final = "0.8.0"
 
 # Fired on the bus whenever a watched product's price changes between polls, so
 # notifications (Telegram, mobile push) do not have to enumerate entity ids.
@@ -114,6 +114,7 @@ CONF_AI_OUTPUT_COST = "ai_output_cost_per_mtok"
 CONF_AI_DAILY_BUDGET = "ai_daily_budget_usd"
 CONF_AI_WEB_SEARCH = "ai_web_search"
 CONF_COMPARISON_PORTALS = "comparison_portals"
+CONF_GEIZHALS = "geizhals"
 CONF_WEB_SEARCH_PROVIDER = "web_search_provider"
 CONF_SEARXNG_URL = "searxng_url"
 CONF_AI_MONTHLY_BUDGET = "ai_monthly_budget_usd"
@@ -141,6 +142,7 @@ DEFAULT_AI_OUTPUT_COST: Final = 1.20
 DEFAULT_AI_DAILY_BUDGET: Final = 1.0
 DEFAULT_AI_WEB_SEARCH: Final = True
 DEFAULT_COMPARISON_PORTALS: Final = False
+DEFAULT_GEIZHALS: Final = True
 DEFAULT_WEB_SEARCH_PROVIDER: Final = "auto"
 DEFAULT_AI_MONTHLY_BUDGET: Final = 10.0
 

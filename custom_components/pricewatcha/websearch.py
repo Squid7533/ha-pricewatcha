@@ -60,6 +60,12 @@ _COMPARISON_HOSTS = (
     "priceradar.",
     "check24.",
     "sparhandy.",
+    "mydealz.",
+    "dealdoktor.",
+    "preisjaeger.",
+    "schnaeppchenfuchs.",
+    "dealabs.",
+    "hotukdeals.",
 )
 _SHOPS = {
     "mediamarkt.de": "MediaMarkt",
@@ -143,6 +149,7 @@ class ComparisonDeal:
 
     title: str
     url: str
+    source: str = "idealo"
     new_price: float | None = None
     new_currency: str = "EUR"
     new_count: int | None = None
@@ -153,6 +160,7 @@ class ComparisonDeal:
         return {
             "title": self.title,
             "url": self.url,
+            "source": self.source,
             "new_price": self.new_price,
             "new_currency": self.new_currency,
             "new_count": self.new_count,
@@ -470,11 +478,73 @@ def parse_idealo(body: str, page_url: str) -> ComparisonDeal | None:
     return ComparisonDeal(
         title=title,
         url=page_url,
+        source="idealo",
         new_price=new_price,
         new_currency=currency,
         new_count=count,
         used_price=used_price,
     )
+
+
+_SIZE_RE = re.compile(r"(\d{1,4})\s*(gb|tb)", re.IGNORECASE)
+
+
+_QUERY_STOP = {
+    "kaufen",
+    "preis",
+    "preise",
+    "angebot",
+    "angebote",
+    "shop",
+    "online",
+    "der",
+    "die",
+    "das",
+    "und",
+    "für",
+    "fur",
+    "mit",
+    "bei",
+    "von",
+    "the",
+}
+
+
+def _query_tokens(query: str) -> list[str]:
+    tokens: list[str] = []
+    for raw in re.split(r"[^0-9a-zäöüß]+", query.casefold().replace("ß", "ss")):
+        if len(raw) >= 2 and raw not in _QUERY_STOP:
+            tokens.append(raw)
+    return tokens
+
+
+def _matches_query(text: str, query: str) -> bool:
+    # Storage is checked separately: comparison base pages often omit the variant.
+    tokens = [
+        token
+        for token in _query_tokens(query)
+        if not re.fullmatch(r"\d{1,4}(?:gb|tb)", token)
+    ]
+    if not tokens:
+        return True
+    normalized = re.sub(r"[^0-9a-zäöüß]+", "", text.casefold().replace("ß", "ss"))
+    return all(token in normalized for token in tokens)
+
+
+def _query_sizes(query: str) -> set[str]:
+    return {f"{int(size)}{unit.lower()}" for size, unit in _SIZE_RE.findall(query)}
+
+
+def _matches_size(text: str, sizes: set[str]) -> bool:
+    if not sizes:
+        return True
+    page_sizes = {
+        f"{int(size)}{unit.lower()}"
+        for size, unit in _SIZE_RE.findall(text)
+    }
+    if not page_sizes:
+        return True
+    return bool(page_sizes & sizes)
 
 
 async def find_idealo_comparison(
@@ -494,18 +564,86 @@ async def find_idealo_comparison(
         limit=6,
         language=language,
     )
-    url = next(
-        (
-            result.url
-            for result in results
-            if "idealo." in urlparse(result.url).netloc.lower()
-            and "/preisvergleich/" in result.url
-        ),
-        None,
-    )
+    sizes = _query_sizes(query)
+    candidates = [
+        result
+        for result in results
+        if "idealo." in urlparse(result.url).netloc.lower()
+        and "/preisvergleich/" in result.url
+        and _matches_query(f"{result.title} {result.url}", query)
+        and _matches_size(f"{result.title} {result.url}", sizes)
+    ]
+    url = candidates[0].url if candidates else None
     if not url:
         return None
     body = await fetch_page_html(url)
     if not body:
         return None
     return parse_idealo(body, url)
+
+
+_GEIZHALS_TITLE_PRICE_RE = re.compile(
+    r"ab\s*€\s*(?:&#xa0;|&nbsp;|\s)*([\d.,]+)",
+    re.IGNORECASE,
+)
+
+
+def parse_geizhals(body: str, page_url: str) -> ComparisonDeal | None:
+    """Read the Geizhals aggregate low price from its Open Graph title."""
+    title_match = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        body,
+        re.IGNORECASE,
+    )
+    if not title_match:
+        return None
+    title = html.unescape(title_match.group(1))
+    price_match = _GEIZHALS_TITLE_PRICE_RE.search(title)
+    if not price_match:
+        return None
+    price = parse_price(price_match.group(1) + " €")
+    if price is None:
+        return None
+    clean_title = re.split(r"\s+ab\s+€", title, maxsplit=1)[0].strip()
+    return ComparisonDeal(
+        title=clean_title or "Geizhals",
+        url=page_url,
+        source="geizhals",
+        new_price=price,
+        new_currency="EUR",
+    )
+
+
+async def find_geizhals_comparison(
+    session: aiohttp.ClientSession,
+    query: str,
+    *,
+    provider: str = "duckduckgo",
+    searxng_url: str = "",
+    language: str = "de",
+) -> ComparisonDeal | None:
+    """Find the Geizhals product page for a query and read its low price."""
+    results = await search_web(
+        session,
+        f"{query} geizhals",
+        provider=provider,
+        searxng_url=searxng_url,
+        limit=6,
+        language=language,
+    )
+    sizes = _query_sizes(query)
+    candidates = [
+        result
+        for result in results
+        if "geizhals." in urlparse(result.url).netloc.lower()
+        and "/preisvergleich/" not in result.url
+        and _matches_query(f"{result.title} {result.url}", query)
+        and _matches_size(f"{result.title} {result.url}", sizes)
+    ]
+    url = candidates[0].url if candidates else None
+    if not url:
+        return None
+    body = await fetch_page_html(url)
+    if not body:
+        return None
+    return parse_geizhals(body, url)

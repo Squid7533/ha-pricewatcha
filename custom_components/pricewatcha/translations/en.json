@@ -64,6 +64,7 @@
           "ai_monthly_budget_usd": "Monthly budget (USD, 0 = no limit)",
           "ai_web_search": "Use web search for /ask and /deal",
           "comparison_portals": "Include idealo comparison (unverified)",
+          "geizhals": "Include Geizhals comparison (unverified)",
           "web_search_provider": "Web search provider",
           "searxng_url": "SearXNG URL (optional)"
         }

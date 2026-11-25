@@ -170,7 +170,7 @@ the first chat that writes to the bot becomes the owner and is remembered.
 
 | Command | Does |
 | --- | --- |
-| `/deal iphone 18 pro` | best value, condition, price history, links and a verdict, plus confirmed web finds from shops outside the catalog |
+| `/deal iphone 18 pro` | best value and a condition-aware best-offer block across catalog, web shops, idealo and Geizhals |
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
 | anything without a slash | an action goes to the AI planner; a question becomes `/ask`; otherwise a search |
 | `/search iphone 18 pro` | numbered catalog matches with prices and shops |
@@ -208,6 +208,31 @@ Home Assistant restarts: `/ask` works without a new search, and with AI configur
 plain question after a deal is treated as a follow-up. `/reset` forgets it; a new
 `/deal` starts a fresh conversation. The memory lives in
 `config/.storage/pricewatcha.conversations`.
+
+### Free-source offer engine
+
+0.8.0 normalizes every result into one `Offer`: Pricewatcha catalog deals, direct shop
+pages, idealo and Geizhals. `/deal` adds a compact block before the catalog table:
+
+```
+Beste Angebote
+Bester Neupreis: 799 € · MediaMarkt · zzgl. Versand
+Bester Refurbished-Preis: 669 € · Asgoodasnew · zzgl. Versand
+Bester Gebrauchtpreis: 639 € · idealo · zzgl. Versand
+```
+
+- Conditions are never mixed: new, refurbished, used and unknown are separate.
+- A known total (`price + shipping`) wins; unknown shipping is labeled, never treated as
+  zero.
+- Offers are deduplicated by product key, shop and condition.
+- Geizhals is a new free source, on by default under **Configure → AI → Include Geizhals
+  comparison**; the idealo comparison remains opt-in.
+- `/track 1` selects the first web offer; if there is none, the same number selects the
+  first normalized catalog offer and watches it. Aggregate comparison prices explain
+  that they are not trackable.
+
+The old **Web finds** and **Preisvergleich** sections remain as the detailed external
+view. A failed source only removes its rows; the catalog answer still stands.
 
 ### Web finds in `/deal`
 

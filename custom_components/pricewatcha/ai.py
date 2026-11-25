@@ -837,6 +837,8 @@ _ASSESSMENT_PROMPTS = {
         "nur, wenn sie günstiger sind; der Katalog bleibt maßgeblich.\n"
         "- comparisons sind idealo-Aggregatpreise (neu und B-Ware/Gebraucht), ohne "
         "Versand und ohne Händler; nenne sie nur mit Quelle und als unbestätigt.\n"
+        "- best_by_condition ist die normalisierte Auswahl je Zustand; nutze sie für "
+        "die Empfehlung, ohne die Zustände zu vermischen.\n"
         "- Keine Spekulation über künftige Aktionen (z. B. Black Friday) oder Shops, "
         "die nicht in den Daten stehen.\n"
         "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
@@ -857,6 +859,8 @@ _ASSESSMENT_PROMPTS = {
         "- comparisons are idealo aggregate prices (new and B-Ware/used), without "
         "shipping and without a merchant; mention them only with the source and as "
         "unverified.\n"
+        "- best_by_condition is the normalized pick per condition; use it for the "
+        "recommendation without mixing conditions.\n"
         "- Do not speculate about future sales (e.g. Black Friday) or shops that are "
         "not in the data.\n"
         "- No tables, no markdown, no bullet points, no emojis.\n"
@@ -1459,6 +1463,23 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if comparisons:
         compact["comparisons"] = comparisons
+    best = [
+        {
+            "condition": item.get("condition"),
+            "price": (item.get("offer") or {}).get("price"),
+            "currency": (item.get("offer") or {}).get("currency"),
+            "shop": (item.get("offer") or {}).get("shop"),
+            "source": (item.get("offer") or {}).get("source"),
+            "aggregate": ((item.get("offer") or {}).get("extra") or {}).get(
+                "aggregate"
+            ),
+            "shipping_known": (item.get("offer") or {}).get("shipping_known"),
+        }
+        for item in (payload.get("best_by_condition") or [])[:4]
+        if isinstance(item, dict)
+    ]
+    if best:
+        compact["best_by_condition"] = best
     if payload.get("partial"):
         compact["partial"] = {
             "history_missing": bool((payload["partial"] or {}).get("history")),

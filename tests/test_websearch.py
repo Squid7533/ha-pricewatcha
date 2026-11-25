@@ -8,6 +8,7 @@ import custom_components.pricewatcha.websearch as websearch
 from custom_components.pricewatcha.websearch import (
     SearchResult,
     build_query,
+    parse_geizhals,
     parse_idealo,
     parse_duckduckgo,
     parse_price,
@@ -180,3 +181,19 @@ def test_parse_idealo_reads_new_and_used_aggregates():
     assert comparison.new_count == 28
     assert comparison.used_price == 639.13
     assert comparison.title == "Apple iPhone Air"
+
+
+def test_parse_geizhals_reads_the_open_graph_low_price():
+    body = """
+    <html><head>
+      <meta property="og:title"
+            content="Apple iPhone Air ab €&#xa0;799,00 (2026) | Preisvergleich Geizhals Deutschland">
+    </head></html>
+    """
+    comparison = parse_geizhals(body, "https://geizhals.de/apple-iphone-air-v1.html")
+
+    assert comparison is not None
+    assert comparison.source == "geizhals"
+    assert comparison.title == "Apple iPhone Air"
+    assert comparison.new_price == 799.0
+    assert comparison.new_currency == "EUR"
