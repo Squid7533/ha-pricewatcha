@@ -9,6 +9,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .ai import AIAdvisor, AIConfig
 from .api import PricewatchaClient
 from .const import (
+    CONF_COMPARISON_PORTALS,
+    DEFAULT_COMPARISON_PORTALS,
     CONF_API_KEY,
     CONF_TELEGRAM_MIN_DROP,
     CONF_CONVERSATION_TTL_DAYS,
@@ -56,6 +58,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
         ),
         search_provider=ai_config.web_search_provider,
         searxng_url=ai_config.searxng_url,
+        comparison_portals=bool(
+            entry.options.get(
+                CONF_COMPARISON_PORTALS, DEFAULT_COMPARISON_PORTALS
+            )
+        ),
     )
     await frontend.async_start()
 

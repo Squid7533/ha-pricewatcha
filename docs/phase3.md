@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 159 tests pass.
+breaks the deterministic reply; 162 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,7 +140,7 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 159 tests pass.
+blocked shop sends no photo and no error; 162 tests pass.
 
 ## 3d — conversation memory (done in 0.4.5)
 
@@ -162,7 +162,7 @@ conversation.
 **Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
 it and `/ask` asks for a new `/deal`; entries older than the configured 3–7 days are
 ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
-159 tests pass.
+162 tests pass.
 
 ## Release plan
 
@@ -200,3 +200,14 @@ ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
   catalog table and verdict stay catalog-only, with a note when a web find is cheaper.
 - Web finds become the numbered `/track` offers and are passed to the AI assessment as
   `web_deals`.
+
+
+## After phase 3 — 0.7.0 optional idealo comparison
+
+- idealo's official APIs are merchant-side (PWS 2.0 and the order API), so there is no
+  public competitor-price API.
+- Optional `comparison_portals` reads the public idealo product page: JSON-LD
+  `AggregateOffer` for the new low/count and the B-Ware/Gebraucht button for the used
+  low.
+- Rendered as a separate unverified block; not trackable, no shop, shipping excluded.
+- Off by default because markup and bot protection can change; a failed fetch omits it.

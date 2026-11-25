@@ -53,6 +53,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "prices_by_condition": "Prices by condition",
         "web_deals_header": "Web finds (unverified)",
         "web_deals_hint": "Web prices are unverified; /track 1 watches one.",
+        "comparison_header": "Price comparison (unverified)",
+        "comparison_new": "new from {price}",
+        "comparison_used": "B-Ware/used from {price}",
+        "comparison_count": "{count} offers",
+        "comparison_hint": "Aggregate price excluding shipping; not trackable.",
+        "comparison_verdict_note": "A cheaper comparison price is listed above (unverified).",
         "verdict": "Verdict",
         "below_average": "{pct} below its own average ({average})",
         "above_average": "{pct} above its own average ({average})",
@@ -149,6 +155,12 @@ _STRINGS: dict[str, dict[str, str]] = {
         "prices_by_condition": "Preise nach Zustand",
         "web_deals_header": "Web-Funde (ungeprüft)",
         "web_deals_hint": "Web-Preise sind ungeprüft; /track 1 beobachtet eines.",
+        "comparison_header": "Preisvergleich (ungeprüft)",
+        "comparison_new": "neu ab {price}",
+        "comparison_used": "B-Ware/Gebraucht ab {price}",
+        "comparison_count": "{count} Angebote",
+        "comparison_hint": "Aggregatpreis ohne Versand; nicht trackbar.",
+        "comparison_verdict_note": "Ein günstigerer Vergleichspreis steht oben (ungeprüft).",
         "verdict": "Fazit",
         "below_average": "{pct} unter dem eigenen Schnitt ({average})",
         "above_average": "{pct} über dem eigenen Schnitt ({average})",
@@ -596,6 +608,51 @@ def format_deals(
                 lines.append(title)
         lines += ["", f"<i>{_t(language, 'web_deals_hint')}</i>"]
 
+    comparisons = [
+        item for item in (payload.get("comparisons") or []) if isinstance(item, dict)
+    ]
+    for comparison in comparisons[:2]:
+        lines += ["", f"<b>{_t(language, 'comparison_header')}</b>"]
+        url = str(comparison.get("url") or "")
+        parts = []
+        if comparison.get("new_price") is not None:
+            part = _t(
+                language,
+                "comparison_new",
+                price=_money(
+                    comparison.get("new_price"),
+                    comparison.get("new_currency"),
+                    language,
+                ),
+            )
+            if comparison.get("new_count"):
+                part += " · " + _t(
+                    language,
+                    "comparison_count",
+                    count=comparison["new_count"],
+                )
+            parts.append(part)
+        if comparison.get("used_price") is not None:
+            parts.append(
+                _t(
+                    language,
+                    "comparison_used",
+                    price=_money(
+                        comparison.get("used_price"),
+                        comparison.get("used_currency"),
+                        language,
+                    ),
+                )
+            )
+        label = "idealo"
+        if url.startswith("http"):
+            lines.append(
+                f'<a href="{_esc_attr(url)}">{label}</a>: ' + " · ".join(parts)
+            )
+        else:
+            lines.append(f"{label}: " + " · ".join(parts))
+        lines += ["", f"<i>{_t(language, 'comparison_hint')}</i>"]
+
     if include_verdict:
         verdict = _verdict(deals, groups, language)
         if verdict:
@@ -614,12 +671,22 @@ def format_deals(
                 for offer in web_deals
                 if offer.get("price") is not None
             ]
+            comparison_prices = [
+                float(comparison[key])
+                for comparison in comparisons
+                for key in ("new_price", "used_price")
+                if comparison.get(key) is not None
+            ]
             if (
-                web_prices
+                (web_prices or comparison_prices)
                 and catalog_prices
-                and min(web_prices) < min(catalog_prices)
+                and min(web_prices + comparison_prices) < min(catalog_prices)
             ):
-                verdict += " " + _t(language, "web_verdict_note")
+                verdict += " " + (
+                    _t(language, "web_verdict_note")
+                    if web_prices
+                    else _t(language, "comparison_verdict_note")
+                )
             lines += ["", f"<b>{_t(language, 'verdict')}:</b> {verdict}"]
 
     partial = payload.get("partial") or {}

@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
-from .media import fetch_page_offer
+from .media import fetch_page_html, fetch_page_offer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -134,6 +134,30 @@ class WebDeal:
             "shop": self.shop,
             "condition": self.condition,
             "snippet": self.snippet,
+        }
+
+
+@dataclass(slots=True)
+class ComparisonDeal:
+    """Idealo's aggregate new/used price for one product page."""
+
+    title: str
+    url: str
+    new_price: float | None = None
+    new_currency: str = "EUR"
+    new_count: int | None = None
+    used_price: float | None = None
+    used_currency: str = "EUR"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "new_price": self.new_price,
+            "new_currency": self.new_currency,
+            "new_count": self.new_count,
+            "used_price": self.used_price,
+            "used_currency": self.used_currency,
         }
 
 
@@ -384,3 +408,104 @@ async def find_web_deals(
             break
     deals.sort(key=lambda deal: deal.price)
     return deals
+
+
+def _walk_json(value):
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _walk_json(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_json(item)
+
+
+_USED_PRICE_RE = re.compile(
+    r"B-Ware\s*(?:&amp;|&)\s*Gebraucht.*?ab\s*(?:</span>\s*)?"
+    r"<strong>\s*([\d.,]+)\s*€",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_idealo(body: str, page_url: str) -> ComparisonDeal | None:
+    """Read the AggregateOffer and the B-Ware/Gebraucht low price from idealo."""
+    title = "idealo"
+    new_price = None
+    currency = "EUR"
+    count = None
+    for match in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        body,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        try:
+            data = json.loads(html.unescape(match.group(1)).strip())
+        except ValueError:
+            continue
+        for node in _walk_json(data):
+            offers = node.get("offers")
+            for offer in offers if isinstance(offers, list) else [offers]:
+                if not isinstance(offer, dict):
+                    continue
+                price = offer.get("lowPrice") or offer.get("price")
+                if price is None:
+                    continue
+                try:
+                    price_value = float(str(price).replace(",", "."))
+                except ValueError:
+                    continue
+                if new_price is None or price_value < new_price:
+                    new_price = price_value
+                    currency = str(offer.get("priceCurrency") or "EUR")
+                    if isinstance(node.get("name"), str) and node["name"]:
+                        title = node["name"]
+                    try:
+                        count = int(offer.get("offerCount"))
+                    except (TypeError, ValueError):
+                        count = None
+    used_match = _USED_PRICE_RE.search(body)
+    used_price = parse_price(used_match.group(1) + " €") if used_match else None
+    if new_price is None and used_price is None:
+        return None
+    return ComparisonDeal(
+        title=title,
+        url=page_url,
+        new_price=new_price,
+        new_currency=currency,
+        new_count=count,
+        used_price=used_price,
+    )
+
+
+async def find_idealo_comparison(
+    session: aiohttp.ClientSession,
+    query: str,
+    *,
+    provider: str = "duckduckgo",
+    searxng_url: str = "",
+    language: str = "de",
+) -> ComparisonDeal | None:
+    """Find the idealo product page for a query and read its aggregate prices."""
+    results = await search_web(
+        session,
+        f"{query} idealo",
+        provider=provider,
+        searxng_url=searxng_url,
+        limit=6,
+        language=language,
+    )
+    url = next(
+        (
+            result.url
+            for result in results
+            if "idealo." in urlparse(result.url).netloc.lower()
+            and "/preisvergleich/" in result.url
+        ),
+        None,
+    )
+    if not url:
+        return None
+    body = await fetch_page_html(url)
+    if not body:
+        return None
+    return parse_idealo(body, url)

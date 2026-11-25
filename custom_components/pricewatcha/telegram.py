@@ -22,7 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .media import ProductMedia, fetch_product_media
-from .websearch import find_web_deals
+from .websearch import find_idealo_comparison, find_web_deals
 from .const import (
     CONVERSATION_HISTORY_MAX,
     CONVERSATION_STORAGE_KEY,
@@ -143,6 +143,7 @@ class TelegramFrontend:
         web_search: bool = False,
         search_provider: str = "duckduckgo",
         searxng_url: str = "",
+        comparison_portals: bool = False,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
@@ -153,6 +154,7 @@ class TelegramFrontend:
         self._web_search = web_search
         self._search_provider = search_provider
         self._searxng_url = searxng_url
+        self._comparison_portals = comparison_portals
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
@@ -992,6 +994,20 @@ class TelegramFrontend:
                     web_deals = []
                 if web_deals:
                     payload["web_deals"] = [deal.to_dict() for deal in web_deals]
+        if self._comparison_portals and payload.get("deals"):
+            try:
+                comparison = await find_idealo_comparison(
+                    async_get_clientsession(self.hass),
+                    str(payload.get("query") or ""),
+                    provider=self._search_provider,
+                    searxng_url=self._searxng_url,
+                    language=self._language,
+                )
+            except Exception:  # noqa: BLE001 - the catalog answer stands alone
+                _LOGGER.debug("Comparison lookup failed", exc_info=True)
+                comparison = None
+            if comparison is not None:
+                payload["comparisons"] = [comparison.to_dict()]
 
         await self._async_send(
             chat_id,

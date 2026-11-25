@@ -28,9 +28,11 @@ from .const import (
     CONF_AI_TIMEOUT,
     CONF_AI_WEB_SEARCH,
     CONF_API_KEY,
+    CONF_COMPARISON_PORTALS,
     CONF_CONVERSATION_TTL_DAYS,
     CONF_LANGUAGE,
     CONF_SEARXNG_URL,
+    DEFAULT_COMPARISON_PORTALS,
     CONF_SCAN_INTERVAL,
     CONF_TELEGRAM_MIN_DROP,
     CONF_TELEGRAM_PHOTOS,
@@ -270,6 +272,12 @@ class PricewatchaOptionsFlow(OptionsFlow):
                         CONF_AI_WEB_SEARCH,
                         default=current.get(
                             CONF_AI_WEB_SEARCH, DEFAULT_AI_WEB_SEARCH
+                        ),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_COMPARISON_PORTALS,
+                        default=current.get(
+                            CONF_COMPARISON_PORTALS, DEFAULT_COMPARISON_PORTALS
                         ),
                     ): selector.BooleanSelector(),
                     vol.Optional(

@@ -8,6 +8,7 @@ import custom_components.pricewatcha.websearch as websearch
 from custom_components.pricewatcha.websearch import (
     SearchResult,
     build_query,
+    parse_idealo,
     parse_duckduckgo,
     parse_price,
     parse_searxng,
@@ -157,3 +158,25 @@ def test_parse_price_handles_german_and_plain_formats():
     assert parse_price("nur 1.128,99 EUR") == 1128.99
     assert parse_price("799 €") == 799.0
     assert parse_price("kein Preis") is None
+
+
+def test_parse_idealo_reads_new_and_used_aggregates():
+    body = """
+    <script type="application/ld+json">
+    {"@type":"Product","name":"Apple iPhone Air","offers":{
+      "@type":"AggregateOffer","lowPrice":884.99,"highPrice":1763.72,
+      "offerCount":28,"priceCurrency":"EUR",
+      "itemCondition":"https://schema.org/NewCondition"}}
+    </script>
+    <div class="condition">
+      B-Ware &amp; Gebraucht
+      <span>ab</span><strong>639,13 €</strong>
+    </div>
+    """
+    comparison = parse_idealo(body, "https://www.idealo.de/preisvergleich/OffersOfProduct/1.html")
+
+    assert comparison is not None
+    assert comparison.new_price == 884.99
+    assert comparison.new_count == 28
+    assert comparison.used_price == 639.13
+    assert comparison.title == "Apple iPhone Air"

@@ -272,6 +272,16 @@ async def _curl_get(url: str, *, timeout: int = FETCH_TIMEOUT):
         return None
 
 
+async def fetch_page_html(page_url: str, *, timeout: int = 8) -> str | None:
+    """One page body; ``None`` when the shop blocks or the request fails."""
+    if not page_url.startswith("http"):
+        return None
+    response = await _curl_get(page_url, timeout=timeout)
+    if response is None or response.status_code != 200:
+        return None
+    return response.text
+
+
 async def fetch_product_media(page_url: str) -> ProductMedia | None:
     """One page fetch plus one image download. ``None`` when nothing usable came back."""
     if not page_url.startswith("http"):

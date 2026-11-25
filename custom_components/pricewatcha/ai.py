@@ -835,6 +835,8 @@ _ASSESSMENT_PROMPTS = {
         "- Wiederhole nicht die Preistabelle; nenne höchstens zwei Beträge.\n"
         "- web_deals sind externe, unbestätigte Funde. Nenne sie nur mit Quelle und "
         "nur, wenn sie günstiger sind; der Katalog bleibt maßgeblich.\n"
+        "- comparisons sind idealo-Aggregatpreise (neu und B-Ware/Gebraucht), ohne "
+        "Versand und ohne Händler; nenne sie nur mit Quelle und als unbestätigt.\n"
         "- Keine Spekulation über künftige Aktionen (z. B. Black Friday) oder Shops, "
         "die nicht in den Daten stehen.\n"
         "- Keine Tabellen, kein Markdown, keine Aufzählungszeichen, keine Emojis.\n"
@@ -852,6 +854,9 @@ _ASSESSMENT_PROMPTS = {
         "- Do not repeat the price table; mention at most two amounts.\n"
         "- web_deals are external, unverified finds. Mention them only with their "
         "source and only when they are cheaper; the catalog stays authoritative.\n"
+        "- comparisons are idealo aggregate prices (new and B-Ware/used), without "
+        "shipping and without a merchant; mention them only with the source and as "
+        "unverified.\n"
         "- Do not speculate about future sales (e.g. Black Friday) or shops that are "
         "not in the data.\n"
         "- No tables, no markdown, no bullet points, no emojis.\n"
@@ -1443,6 +1448,17 @@ def _compact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if web_deals:
         compact["web_deals"] = web_deals
+    comparisons = [
+        {
+            key: item.get(key)
+            for key in ("title", "url", "new_price", "new_count", "used_price")
+            if item.get(key) is not None
+        }
+        for item in (payload.get("comparisons") or [])[:2]
+        if isinstance(item, dict)
+    ]
+    if comparisons:
+        compact["comparisons"] = comparisons
     if payload.get("partial"):
         compact["partial"] = {
             "history_missing": bool((payload["partial"] or {}).get("history")),

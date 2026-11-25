@@ -220,6 +220,25 @@ from the catalog and never change the catalog verdict; if one is cheaper, the ve
 adds a note. `/track 1` watches the first web find. Turn the search off with
 **Configure → AI → Use web search for /ask and /deal**.
 
+### Idealo comparison (optional)
+
+idealo has no public API for competitor offers — its official APIs are merchant-side
+(PWS 2.0 for uploading your own offers and the order API). As an optional extra,
+**Configure → AI → Include idealo comparison** reads the public JSON-LD on the idealo
+product page and adds an aggregate block:
+
+```
+Preisvergleich (ungeprüft)
+idealo: neu ab 884,99 € · 28 Angebote · B-Ware/Gebraucht ab 639,13 €
+```
+
+This is the **lowest aggregate price**, not a shop: shipping is excluded, the used price
+is idealo's B-Ware/Gebraucht bucket, and the idealo page cannot be `/track`ed. It is
+therefore its own unverified block and never changes the catalog ranking. The option is
+**off by default** because idealo can change its markup or block automated requests; a
+failed fetch simply omits the block. For reliable per-shop offers, a paid price API
+(such as PricePirate) would be the alternative.
+
 ### Talking to the bot
 
 With an AI provider that supports tool calls (DeepSeek, OpenAI and most

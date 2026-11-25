@@ -312,7 +312,12 @@ def run(coro):
 
 
 async def make_frontend(
-    hass=None, min_drop=2.0, advisor=None, photos=False, web_search=False
+    hass=None,
+    min_drop=2.0,
+    advisor=None,
+    photos=False,
+    web_search=False,
+    comparison_portals=False,
 ):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
@@ -323,6 +328,7 @@ async def make_frontend(
         advisor=advisor,
         photos=photos,
         web_search=web_search,
+        comparison_portals=comparison_portals,
     )
     await frontend.async_start()
     return hass, coordinator, frontend
@@ -1503,5 +1509,37 @@ def test_deal_includes_cheaper_web_finds_and_track_uses_them(monkeypatch):
         )
         await asyncio.sleep(0.05)
         assert coordinator.client.tracked == ["https://www.mediamarkt.de/de/product/x"]
+
+    run(scenario())
+
+
+def test_deal_includes_idealo_comparison_when_enabled(monkeypatch):
+    import custom_components.pricewatcha.telegram as telegram_module
+    from custom_components.pricewatcha.websearch import ComparisonDeal
+
+    async def fake_comparison(session, query, **kwargs):
+        return ComparisonDeal(
+            title="Apple iPhone 17 Pro",
+            url="https://www.idealo.de/preisvergleich/OffersOfProduct/1.html",
+            new_price=1128.99,
+            new_count=230,
+            used_price=899.0,
+        )
+
+    monkeypatch.setattr(telegram_module, "find_idealo_comparison", fake_comparison)
+
+    async def scenario():
+        hass, _, _ = await make_frontend(comparison_portals=True)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/deal", "args": ["iphone", "17", "pro"]},
+        )
+        await asyncio.sleep(0.05)
+
+        message = hass.services.calls[-1][2]["message"]
+        assert "Price comparison (unverified)" in message
+        assert "new from" in message
+        assert "230 offers" in message
+        assert "B-Ware/used from 899 €" in message
 
     run(scenario())
