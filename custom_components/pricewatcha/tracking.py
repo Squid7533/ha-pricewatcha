@@ -249,7 +249,12 @@ class TrackedOfferManager:
             offer["url"] = fetched["url"]
         self._append_snapshot(offer, total)
         await self._async_save()
-        return await self._async_notify_drop(offer, old_total, total)
+        event = await self._async_notify_drop(offer, old_total, total)
+        if event is not None:
+            # Persist last_notified_total after the send, so a restart does not repeat
+            # a target notification at the same price.
+            await self._async_save()
+        return event
 
     async def _async_fetch(self, offer: dict[str, Any]) -> dict[str, Any] | None:
         source = str(offer.get("source") or "")

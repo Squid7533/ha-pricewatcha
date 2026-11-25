@@ -2,7 +2,7 @@
 
 Status: 0.8.0 and 0.9.0 implemented in v0.8.0/v0.9.0.
 
-Baseline: 0.7.0, 162 tests; 0.8.0 adds 9 (171 total), 0.9.0 adds 10 (181 total).
+Baseline: 0.7.0, 162 tests; 0.8.0 adds 9 (171 total), 0.9.0 adds 11 (182 total).
 
 ## Goal
 

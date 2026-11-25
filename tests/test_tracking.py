@@ -191,3 +191,40 @@ def test_remove_stops_refresh():
         assert manager.get(offer["id"], 1) is None
 
     run(scenario())
+
+
+def test_restart_does_not_repeat_a_target_notification(monkeypatch):
+    store = MemoryStore()
+    notifications = []
+
+    async def notify(chat_id, offer, event):
+        notifications.append(event)
+
+    async def fake_page(url, query=""):
+        return PageOffer(title="iPhone", price=90, currency="EUR", url=url)
+
+    monkeypatch.setattr(tracking, "fetch_page_offer", fake_page)
+
+    async def scenario():
+        manager = TrackedOfferManager(None, FakeClient(), store=store)
+        await manager.async_load()
+        manager._notify = notify
+        offer, _ = await manager.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone",
+            shop="Shop",
+            price=100,
+            target_total=90,
+        )
+        event = await manager.async_refresh(offer["id"])
+        assert event["reason"] == "target"
+
+        restarted = TrackedOfferManager(None, FakeClient(), store=store)
+        await restarted.async_load()
+        restarted._notify = notify
+        assert await restarted.async_refresh(offer["id"]) is None
+        assert len(notifications) == 1
+
+    run(scenario())
