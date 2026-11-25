@@ -23,6 +23,7 @@ from homeassistant.helpers.storage import Store
 
 from .media import ProductMedia, fetch_product_media
 from .sources import build_offer_view
+from .tracking import TrackedOfferManager
 from .websearch import (
     find_geizhals_comparison,
     find_idealo_comparison,
@@ -53,6 +54,14 @@ from .format import (
     format_ref_not_found,
     format_refreshed,
     format_search,
+    format_tracked_added,
+    format_tracked_alert,
+    format_tracked_alerts,
+    format_tracked_drop,
+    format_tracked_exists,
+    format_tracked_history,
+    format_tracked_list,
+    format_tracked_untracked,
     format_status,
     format_unwatched,
     format_watchlist,
@@ -92,6 +101,8 @@ BOT_COMMANDS = [
     ("ask", "Ask about your last deal"),
     ("search", "Search the product catalog"),
     ("track", "Track a product URL"),
+    ("untrack", "Stop tracking a web offer"),
+    ("trackalerts", "Tracked web-offer alerts"),
     ("watch", "Watch a product id"),
     ("watchlist", "List watched products"),
     ("history", "Price history for a result"),
@@ -109,6 +120,8 @@ _BOT_COMMAND_LABELS = {
         "ask": "Zum letzten Deal fragen",
         "search": "Produktkatalog durchsuchen",
         "track": "Produkt-URL tracken",
+        "untrack": "Web-Angebot nicht mehr tracken",
+        "trackalerts": "Alarme für Web-Angebote",
         "watch": "Katalogprodukt beobachten",
         "watchlist": "Beobachtete Produkte anzeigen",
         "history": "Preisverlauf eines Treffers",
@@ -151,6 +164,7 @@ class TelegramFrontend:
         searxng_url: str = "",
         comparison_portals: bool = False,
         geizhals: bool = False,
+        tracker: TrackedOfferManager | None = None,
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
@@ -163,6 +177,7 @@ class TelegramFrontend:
         self._searxng_url = searxng_url
         self._comparison_portals = comparison_portals
         self._geizhals = geizhals
+        self._tracker = tracker
         # The bot language is one setting: table, verdict, help and AI text all
         # follow it. Tests may pass an advisor alone, so fall back to its language.
         self._language = language or (advisor.language if advisor else "en")
@@ -199,6 +214,8 @@ class TelegramFrontend:
             self.hass, CONVERSATION_STORAGE_VERSION, CONVERSATION_STORAGE_KEY
         )
         await self._async_load_memory()
+        if self._tracker is not None:
+            await self._tracker.async_start(self._async_offer_notify)
 
         self._unsubscribers = [
             self.hass.bus.async_listen(EVENT_TELEGRAM_COMMAND, self._on_command),
@@ -221,6 +238,8 @@ class TelegramFrontend:
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()
+        if self._tracker is not None:
+            self._tracker.async_stop()
 
     @property
     def chat_ids(self) -> list[int]:
@@ -507,6 +526,21 @@ class TelegramFrontend:
                 {"ref": f"l{index}", **entry}
                 for index, entry in enumerate(self._watchlist_entries(chat_id), start=1)
             ],
+            "tracked": [
+                {
+                    "ref": offer.get("id"),
+                    "title": offer.get("title"),
+                    "shop": offer.get("shop"),
+                    "condition": offer.get("condition"),
+                    "price": offer.get("last_total"),
+                    "currency": offer.get("currency"),
+                    "target_total": offer.get("target_total"),
+                    "drop": bool(offer.get("notify_on_drop")),
+                }
+                for offer in (
+                    self._tracker.list(chat_id) if self._tracker is not None else []
+                )[:20]
+            ],
             "alerts": [
                 {
                     "ref": f"a{alert.get('alert_id')}",
@@ -587,6 +621,70 @@ class TelegramFrontend:
         if name == "list_alerts":
             await self._async_alerts(chat_id)
             return None
+
+        if name in (
+            "track_offer",
+            "untrack_offer",
+            "list_tracked_offers",
+            "offer_history",
+            "create_offer_alert",
+            "delete_offer_alert",
+        ):
+            if name == "track_offer":
+                target = self._resolve_agent_target(
+                    chat_id, str(args.get("ref") or "")
+                )
+                if target is None:
+                    return format_ref_not_found(self._language)
+                kind, entry = target
+                if kind == "offer":
+                    url = str(entry.get("url") or "")
+                    if not url:
+                        return format_ref_not_found(self._language)
+                    await self._async_track(chat_id, [url])
+                    return None
+                if entry.get("product_id"):
+                    await self._async_watch(chat_id, str(entry["product_id"]))
+                    return None
+                return format_ref_not_found(self._language)
+            if name == "list_tracked_offers":
+                offers = self._tracker.list(chat_id) if self._tracker is not None else []
+                return format_tracked_list(offers, self._language)
+            offer = self._tracked_for(chat_id, str(args.get("ref") or ""))
+            if offer is None:
+                return format_ref_not_found(self._language)
+            if name == "untrack_offer":
+                await self._tracker.async_remove(str(offer["id"]), chat_id)
+                return format_tracked_untracked(
+                    str(offer["id"]), self._language
+                )
+            if name == "offer_history":
+                return format_tracked_history(offer, self._language)
+            if name == "delete_offer_alert":
+                updated = await self._tracker.async_set_alert(
+                    str(offer["id"]),
+                    target_total=None,
+                    notify_on_drop=False,
+                    chat_id=chat_id,
+                )
+                return format_tracked_alert(
+                    updated or offer, self._language
+                )
+            if name == "create_offer_alert":
+                target = args.get("target_total")
+                try:
+                    target = float(target) if target is not None else None
+                except (TypeError, ValueError):
+                    target = None
+                updated = await self._tracker.async_set_alert(
+                    str(offer["id"]),
+                    target_total=target,
+                    notify_on_drop=bool(args.get("drop", False)),
+                    chat_id=chat_id,
+                )
+                return format_tracked_alert(
+                    updated or offer, self._language
+                )
 
         if name in ("price_history", "product"):
             target = self._resolve_agent_target(chat_id, str(args.get("ref") or ""))
@@ -896,6 +994,12 @@ class TelegramFrontend:
             await self._async_search(chat_id, rest)
         elif command == "/track":
             await self._async_track(chat_id, args)
+        elif command == "/untrack":
+            await self._async_untrack(chat_id, args[0] if args else "")
+        elif command == "/trackalert":
+            await self._async_track_alert(chat_id, args)
+        elif command == "/trackalerts":
+            await self._async_track_alerts(chat_id)
         elif command == "/watch":
             await self._async_watch(chat_id, args[0] if args else "")
         elif command == "/unwatch":
@@ -960,6 +1064,13 @@ class TelegramFrontend:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    async def _async_offer_notify(
+        self, chat_id: int, offer: dict[str, Any], event: dict[str, Any]
+    ) -> None:
+        await self._async_send(
+            chat_id, format_tracked_drop(event, self._language)
+        )
 
     # --- command implementations ----------------------------------------------
 
@@ -1054,7 +1165,14 @@ class TelegramFrontend:
         self._last_offers.pop(chat_id, None)
         if payload.get("web_deals"):
             self._last_offers[chat_id] = [
-                {"url": str(deal["url"]), "title": str(deal.get("title") or "?")}
+                {
+                    "url": str(deal["url"]),
+                    "title": str(deal.get("title") or "?"),
+                    "price": deal.get("price"),
+                    "currency": deal.get("currency") or "EUR",
+                    "shop": deal.get("shop"),
+                    "condition": deal.get("condition"),
+                }
                 for deal in payload["web_deals"]
                 if str(deal.get("url") or "").startswith("http")
             ]
@@ -1228,6 +1346,12 @@ class TelegramFrontend:
                 chat_id, format_usage("/track", "https://shop.example/product", language)
             )
             return
+        meta = next(
+            (offer for offer in self._last_offers.get(chat_id, []) if offer["url"] == url),
+            {},
+        )
+        payload: dict[str, Any] | None = None
+        error: Exception | None = None
         try:
             payload = await self._coordinator.client.track(url, watch=True)
             job_id = payload.get("job_id") if isinstance(payload, dict) else None
@@ -1238,9 +1362,48 @@ class TelegramFrontend:
                 payload = await self._coordinator.client.job(str(job_id))
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("track failed", exc_info=True)
-            await self._async_send(chat_id, self._error_text(err))
+            error = err
+
+        if payload is not None:
+            await self._async_send(chat_id, format_track(payload, language))
+        if self._tracker is not None:
+            product = payload.get("product") if isinstance(payload, dict) else {}
+            product = product if isinstance(product, dict) else {}
+            try:
+                offer, created = await self._tracker.async_add(
+                    chat_id=chat_id,
+                    source="web",
+                    url=url,
+                    title=str(
+                        meta.get("title")
+                        or product.get("name")
+                        or url
+                    ),
+                    shop=str(meta.get("shop") or product.get("shop") or "web"),
+                    price=meta.get("price")
+                    if meta.get("price") is not None
+                    else product.get("current_price"),
+                    currency=str(
+                        meta.get("currency") or product.get("currency") or "EUR"
+                    ),
+                    condition=str(meta.get("condition") or "unknown"),
+                    query=str(
+                        (self._last_deals.get(chat_id) or {}).get("query") or ""
+                    ),
+                )
+            except Exception:  # noqa: BLE001 - Pricewatcha track still succeeded
+                _LOGGER.debug("Could not persist tracked offer", exc_info=True)
+                offer, created = None, False
+            if offer is not None:
+                await self._async_send(
+                    chat_id,
+                    format_tracked_added(offer, language)
+                    if created
+                    else format_tracked_exists(offer, language),
+                )
+        elif payload is None and error is not None:
+            await self._async_send(chat_id, self._error_text(error))
             return
-        await self._async_send(chat_id, format_track(payload, language))
         await self._coordinator.async_request_refresh()
 
     async def _async_watch(self, chat_id: int, raw: str) -> None:
@@ -1316,11 +1479,155 @@ class TelegramFrontend:
     async def _async_watchlist(self, chat_id: int) -> None:
         data = getattr(self._coordinator, "data", None) or {}
         self._last_watchlist[chat_id] = list(data)
+        entries = self._watchlist_entries(chat_id)
+        if entries:
+            await self._async_send(
+                chat_id, format_watchlist(entries, self._language)
+            )
+        tracked = self._tracker.list(chat_id) if self._tracker is not None else []
+        if tracked:
+            await self._async_send(
+                chat_id, format_tracked_list(tracked, self._language)
+            )
+        if not entries and not tracked:
+            await self._async_send(
+                chat_id, format_watchlist([], self._language)
+            )
+
+    def _tracked_for(self, chat_id: int, raw: str) -> dict[str, Any] | None:
+        if self._tracker is None:
+            return None
+        value = str(raw or "").strip().lstrip("#")
+        offers = self._tracker.list(chat_id)
+        if value.isdigit():
+            index = int(value) - 1
+            if 0 <= index < len(offers):
+                return offers[index]
+            return None
+        for offer in offers:
+            if str(offer.get("id")) == value:
+                return offer
+        matches = [offer for offer in offers if str(offer.get("id")).startswith(value)]
+        return matches[0] if len(matches) == 1 else None
+
+    async def _async_untrack(self, chat_id: int, raw: str) -> None:
+        if self._tracker is None:
+            await self._async_send(chat_id, format_usage("/untrack", "#abcd1234", self._language))
+            return
+        if not raw:
+            await self._async_send(
+                chat_id, format_tracked_list(self._tracker.list(chat_id), self._language)
+            )
+            return
+        offer = self._tracked_for(chat_id, raw)
+        if offer is None:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        await self._tracker.async_remove(str(offer["id"]), chat_id)
         await self._async_send(
-            chat_id, format_watchlist(self._watchlist_entries(chat_id), self._language)
+            chat_id, format_tracked_untracked(str(offer["id"]), self._language)
+        )
+
+    async def _async_track_alert(self, chat_id: int, args: list[str]) -> None:
+        if self._tracker is None or not args:
+            await self._async_send(
+                chat_id, format_usage("/trackalert", "1 target 700", self._language)
+            )
+            return
+        offer = self._tracked_for(chat_id, args[0])
+        if offer is None:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        values = [str(item).lower() for item in args[1:]]
+        if not values:
+            await self._async_send(
+                chat_id, format_tracked_alert(offer, self._language)
+            )
+            return
+        target = offer.get("target_total")
+        drop = bool(offer.get("notify_on_drop"))
+        changed = False
+        index = 0
+        while index < len(values):
+            value = values[index]
+            if value in ("off", "clear", "remove", "aus"):
+                target = None
+                drop = False
+                changed = True
+                index += 1
+            elif value == "target" and index + 1 < len(values):
+                try:
+                    target = float(values[index + 1].replace(",", "."))
+                except ValueError:
+                    await self._async_send(
+                        chat_id, format_usage("/trackalert", "1 target 700", self._language)
+                    )
+                    return
+                changed = True
+                index += 2
+            elif value in ("drop", "senkung"):
+                drop = True
+                changed = True
+                if index + 1 < len(values) and values[index + 1] in (
+                    "off",
+                    "aus",
+                    "no",
+                    "false",
+                ):
+                    drop = False
+                    index += 2
+                else:
+                    index += 1
+            elif value in ("no drop", "keine senkung"):
+                drop = False
+                changed = True
+                index += 1
+            else:
+                try:
+                    target = float(value.replace(",", "."))
+                except ValueError:
+                    await self._async_send(
+                        chat_id, format_usage("/trackalert", "1 target 700", self._language)
+                    )
+                    return
+                changed = True
+                index += 1
+        if not changed:
+            await self._async_send(
+                chat_id, format_tracked_alert(offer, self._language)
+            )
+            return
+        updated = await self._tracker.async_set_alert(
+            str(offer["id"]),
+            target_total=target,
+            notify_on_drop=drop,
+            chat_id=chat_id,
+        )
+        await self._async_send(
+            chat_id, format_tracked_alert(updated or offer, self._language)
+        )
+
+    async def _async_track_alerts(self, chat_id: int) -> None:
+        if self._tracker is None:
+            await self._async_send(chat_id, format_tracked_list([], self._language))
+            return
+        offers = [
+            offer
+            for offer in self._tracker.list(chat_id)
+            if offer.get("target_total") is not None or offer.get("notify_on_drop")
+        ]
+        await self._async_send(
+            chat_id, format_tracked_alerts(offers, self._language)
         )
 
     async def _async_history(self, chat_id: int, raw: str) -> None:
+        if raw:
+            tracked = self._tracked_for(chat_id, raw)
+            if tracked is not None:
+                await self._async_send(
+                    chat_id, format_tracked_history(tracked, self._language)
+                )
+                return
         if not raw:
             products = self._last_products.get(chat_id, [])
             if len(products) == 1:
@@ -1395,6 +1702,9 @@ class TelegramFrontend:
             format_status(
                 {
                     "watchlist": len(data),
+                    "tracked": len(self._tracker.list(chat_id))
+                    if self._tracker is not None
+                    else None,
                     "last_update": when,
                     "ai_enabled": ai_enabled,
                     "ai_today": ai_today,

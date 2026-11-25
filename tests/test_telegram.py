@@ -235,6 +235,99 @@ class FakeClient:
         return alert
 
 
+class FakeTracker:
+    def __init__(self):
+        self.offers: dict[str, dict] = {}
+        self.counter = 0
+        self.started = False
+
+    async def async_start(self, notify=None):
+        self.started = True
+
+    def async_stop(self):
+        self.started = False
+
+    def list(self, chat_id=None):
+        return [
+            offer
+            for offer in self.offers.values()
+            if offer.get("active", True)
+            and (chat_id is None or offer.get("chat_id") == chat_id)
+        ]
+
+    def get(self, offer_id, chat_id=None):
+        offer = self.offers.get(offer_id)
+        if offer is None or not offer.get("active", True):
+            return None
+        if chat_id is not None and offer.get("chat_id") != chat_id:
+            return None
+        return offer
+
+    def find(self, chat_id, url):
+        for offer in self.list(chat_id):
+            if offer.get("url") == url:
+                return offer
+        return None
+
+    async def async_add(
+        self,
+        *,
+        chat_id,
+        source,
+        url,
+        title,
+        shop,
+        price,
+        currency="EUR",
+        condition="unknown",
+        source_id=None,
+        query="",
+        target_total=None,
+        notify_on_drop=False,
+    ):
+        existing = self.find(chat_id, url)
+        if existing:
+            return existing, False
+        self.counter += 1
+        offer = {
+            "id": f"t{self.counter}",
+            "chat_id": chat_id,
+            "source": source,
+            "source_id": source_id or url,
+            "url": url,
+            "title": title,
+            "shop": shop,
+            "price": price,
+            "last_total": price,
+            "currency": currency,
+            "condition": condition,
+            "target_total": target_total,
+            "notify_on_drop": notify_on_drop,
+            "active": True,
+            "snapshots": [{"at": "2026-11-25T10:00:00+00:00", "total": price}],
+        }
+        self.offers[offer["id"]] = offer
+        return offer, True
+
+    async def async_remove(self, offer_id, chat_id=None):
+        offer = self.get(offer_id, chat_id)
+        if offer is None:
+            return False
+        offer["active"] = False
+        return True
+
+    async def async_set_alert(
+        self, offer_id, *, target_total=None, notify_on_drop=None, chat_id=None
+    ):
+        offer = self.get(offer_id, chat_id)
+        if offer is None:
+            return None
+        offer["target_total"] = target_total
+        if notify_on_drop is not None:
+            offer["notify_on_drop"] = notify_on_drop
+        return offer
+
+
 class FakeAdvisor:
     """Duck-typed stand-in for AIAdvisor."""
 
@@ -319,6 +412,7 @@ async def make_frontend(
     web_search=False,
     comparison_portals=False,
     geizhals=False,
+    tracker=None,
 ):
     hass = hass or FakeHass()
     coordinator = FakeCoordinator()
@@ -331,6 +425,7 @@ async def make_frontend(
         web_search=web_search,
         comparison_portals=comparison_portals,
         geizhals=geizhals,
+        tracker=tracker,
     )
     await frontend.async_start()
     return hass, coordinator, frontend
@@ -540,7 +635,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "ask", "search", "track", "watch", "watchlist", "history", "status", "refresh", "alerts", "alert", "reset", "help"]
+    assert names == ["deal", "ask", "search", "track", "untrack", "trackalerts", "watch", "watchlist", "history", "status", "refresh", "alerts", "alert", "reset", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -1591,5 +1686,147 @@ def test_deal_engine_lists_geizhals_when_enabled(monkeypatch):
         message = hass.services.calls[-1][2]["message"]
         assert "Geizhals" in message or "geizhals" in message
         assert "1 088.65" in message or "1088.65" in message
+
+    run(scenario())
+
+
+def test_track_persists_a_web_offer_in_the_tracker(monkeypatch):
+    import custom_components.pricewatcha.telegram as telegram_module
+    from custom_components.pricewatcha.websearch import WebDeal
+
+    async def fake_find(session, query, **kwargs):
+        return [
+            WebDeal(
+                title="Apple iPhone 17 Pro",
+                url="https://shop.example/p",
+                price=869,
+                currency="EUR",
+                shop="MediaMarkt",
+                condition="new",
+            )
+        ]
+
+    monkeypatch.setattr(telegram_module, "find_web_deals", fake_find)
+
+    async def scenario():
+        tracker = FakeTracker()
+        hass, _, _ = await make_frontend(web_search=True, tracker=tracker)
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/deal", "args": ["iphone", "17", "pro"]},
+        )
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["1"]}
+        )
+        await asyncio.sleep(0.05)
+
+        assert len(tracker.list(1)) == 1
+        assert "Tracked as #t1" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_tracked_commands_list_alert_and_history():
+    async def scenario():
+        tracker = FakeTracker()
+        hass, _, _ = await make_frontend(tracker=tracker)
+        await tracker.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone Air",
+            shop="MediaMarkt",
+            price=799,
+        )
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/watchlist", "args": []}
+        )
+        await asyncio.sleep(0.05)
+        assert "Tracked external offers" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/trackalert", "args": ["1", "target", "700"]},
+        )
+        await asyncio.sleep(0.05)
+        assert tracker.list(1)[0]["target_total"] == 700.0
+        assert "Alert for #t1" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/history", "args": ["1"]}
+        )
+        await asyncio.sleep(0.05)
+        assert "Tracked history #t1" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/untrack", "args": ["1"]}
+        )
+        await asyncio.sleep(0.05)
+        assert tracker.list(1) == []
+        assert "Stopped tracking #t1" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_natural_language_track_offer_persists_the_web_offer():
+    advisor = FakeAdvisor(
+        citations=[{"url": "https://shop.example/better", "title": "Better offer"}]
+    )
+    advisor.plan = AIPlan(calls=[AIToolCall("track_offer", {"ref": "w1"})])
+
+    async def scenario():
+        tracker = FakeTracker()
+        hass, coordinator, _ = await make_frontend(advisor=advisor, tracker=tracker)
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]}
+        )
+        await asyncio.sleep(0.05)
+        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
+        await asyncio.sleep(0.05)
+        hass.bus.fire(
+            "telegram_text",
+            {"chat_id": 1, "text": "beobachte das angebot von Better offer"},
+        )
+        await asyncio.sleep(0.05)
+
+        assert coordinator.client.tracked == ["https://shop.example/better"]
+        assert len(tracker.list(1)) == 1
+        assert tracker.list(1)[0]["url"] == "https://shop.example/better"
+
+    run(scenario())
+
+
+def test_natural_language_sets_a_tracked_offer_alert():
+    advisor = FakeAdvisor()
+    advisor.plan = AIPlan(
+        calls=[
+            AIToolCall(
+                "create_offer_alert",
+                {"ref": "t1", "target_total": 700, "drop": True},
+            )
+        ]
+    )
+
+    async def scenario():
+        tracker = FakeTracker()
+        offer, _ = await tracker.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone Air",
+            shop="MediaMarkt",
+            price=799,
+        )
+        hass, _, _ = await make_frontend(advisor=advisor, tracker=tracker)
+        hass.bus.fire(
+            "telegram_text",
+            {"chat_id": 1, "text": "setze den alarm auf 700 euro"},
+        )
+        await asyncio.sleep(0.05)
+
+        assert tracker.get(offer["id"], 1)["target_total"] == 700.0
+        assert tracker.get(offer["id"], 1)["notify_on_drop"] is True
 
     run(scenario())

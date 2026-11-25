@@ -33,6 +33,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_ask": "/ask is 669 a good price? — ask the AI about your last deal",
         "help_search": "/search iphone 18 pro — raw catalog matches",
         "help_track": "/track <product url> — track a URL and watch it",
+        "help_untrack": "/untrack #id — stop tracking a web offer",
+        "help_trackalert": "/trackalert 1 target 700 — alert for a tracked web offer",
+        "help_trackalerts": "/trackalerts — tracked web-offer alerts",
         "help_watch": "/watch 1 — watch a result from /deal or /search",
         "help_unwatch": "/unwatch 1 — stop watching a product",
         "help_watchlist": "/watchlist — watched products with numbers",
@@ -97,6 +100,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "product_checked": "Last checked: {when}",
         "status_header": "Pricewatcha status",
         "status_watchlist": "Watchlist: {count} products",
+        "status_tracked": "Tracked web offers: {count}",
         "status_last_update": "Last update: {when}",
         "status_ai": "AI spend: {today} today · {month} this month",
         "status_ai_off": "AI: off",
@@ -135,6 +139,23 @@ _STRINGS: dict[str, dict[str, str]] = {
         "offers_empty": "No web offers stored. Run /ask first, then /track <number>.",
         "offers_hint": "Watch one with /track <number>, or paste a URL.",
         "track_not_trackable": "That is an aggregate price, not a shop offer; open the source instead.",
+        "tracked_added": "Tracked as #{id}",
+        "tracked_exists": "Already tracked as #{id}",
+        "tracked_none": "No external offers tracked yet. Use /track 1 after /deal.",
+        "tracked_list_header": "Tracked external offers:",
+        "tracked_alerts_empty": "No alerts on tracked web offers.",
+        "tracked_target": "target {price}",
+        "tracked_drop": "any drop",
+        "tracked_untracked": "Stopped tracking #{id}.",
+        "tracked_history_header": "Tracked history #{id}",
+        "tracked_history_empty": "No snapshots yet.",
+        "tracked_alert_set": "Alert for #{id}: {detail}",
+        "tracked_alert_removed": "Alert for #{id} removed.",
+        "tracked_drop_title": "Price alert: {title}",
+        "tracked_drop_target": "target {target} reached",
+        "tracked_drop_fall": "price dropped",
+        "tracked_last_checked": "last checked {when}",
+
         "today": "today",
     },
     "de": {
@@ -143,6 +164,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_ask": "/ask ist 669 ein guter Preis? — die KI zum letzten Deal fragen",
         "help_search": "/search iphone 18 pro — rohe Katalogtreffer",
         "help_track": "/track <produkt-url> — URL tracken und beobachten",
+        "help_untrack": "/untrack #id — Web-Angebot nicht mehr tracken",
+        "help_trackalert": "/trackalert 1 target 700 — Alarm für ein getracktes Angebot",
+        "help_trackalerts": "/trackalerts — Alarme für Web-Angebote",
         "help_watch": "/watch 1 — Treffer aus /deal oder /search beobachten",
         "help_unwatch": "/unwatch 1 — Beobachtung beenden",
         "help_watchlist": "/watchlist — beobachtete Produkte mit Nummern",
@@ -207,6 +231,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "product_checked": "Zuletzt geprüft: {when}",
         "status_header": "Pricewatcha-Status",
         "status_watchlist": "Watchlist: {count} Produkte",
+        "status_tracked": "Getrackte Web-Angebote: {count}",
         "status_last_update": "Letzte Aktualisierung: {when}",
         "status_ai": "KI-Ausgaben: {today} heute · {month} diesen Monat",
         "status_ai_off": "KI: aus",
@@ -245,6 +270,23 @@ _STRINGS: dict[str, dict[str, str]] = {
         "offers_empty": "Keine Web-Angebote gespeichert. Zuerst /ask ausführen, dann /track <Nummer>.",
         "offers_hint": "Eines mit /track <Nummer> beobachten oder eine URL einfügen.",
         "track_not_trackable": "Das ist ein Aggregatpreis, kein Shop-Angebot; öffne stattdessen die Quelle.",
+        "tracked_added": "Getrackt als #{id}",
+        "tracked_exists": "Bereits getrackt als #{id}",
+        "tracked_none": "Noch keine externen Angebote getrackt. Nach /deal mit /track 1 starten.",
+        "tracked_list_header": "Getrackte Web-Angebote:",
+        "tracked_alerts_empty": "Keine Alarme für Web-Angebote.",
+        "tracked_target": "Ziel {price}",
+        "tracked_drop": "jede Senkung",
+        "tracked_untracked": "Tracking von #{id} beendet.",
+        "tracked_history_header": "Verlauf #{id}",
+        "tracked_history_empty": "Noch keine Snapshots.",
+        "tracked_alert_set": "Alarm für #{id}: {detail}",
+        "tracked_alert_removed": "Alarm für #{id} entfernt.",
+        "tracked_drop_title": "Preisalarm: {title}",
+        "tracked_drop_target": "Ziel {target} erreicht",
+        "tracked_drop_fall": "Preis gefallen",
+        "tracked_last_checked": "zuletzt geprüft {when}",
+
         "today": "heute",
     },
 }
@@ -398,6 +440,9 @@ def format_help(language: str = "en") -> str:
         _t(language, "help_ask"),
         _t(language, "help_search"),
         _t(language, "help_track"),
+        _t(language, "help_untrack"),
+        _t(language, "help_trackalert"),
+        _t(language, "help_trackalerts"),
         _t(language, "help_watch"),
         _t(language, "help_unwatch"),
         _t(language, "help_watchlist"),
@@ -1122,6 +1167,8 @@ def format_product(product: dict[str, Any], language: str = "en") -> str:
 def format_status(data: dict[str, Any], language: str = "en") -> str:
     lines = [f"<b>{_t(language, 'status_header')}</b>"]
     lines.append(_t(language, "status_watchlist", count=data.get("watchlist", 0)))
+    if data.get("tracked") is not None:
+        lines.append(_t(language, "status_tracked", count=data.get("tracked", 0)))
     if data.get("last_update"):
         lines.append(
             _t(language, "status_last_update", when=_esc(data["last_update"]))
@@ -1181,3 +1228,118 @@ def format_action_error(reason: str, language: str = "de") -> str:
 
 def format_not_trackable(language: str = "en") -> str:
     return _t(language, "track_not_trackable")
+
+
+def _tracked_line(offer: dict[str, Any], language: str, index: int | None = None) -> str:
+    prefix = f"{index}. " if index is not None else ""
+    title = _esc(offer.get("title") or offer.get("url") or "?")
+    price = _money(offer.get("last_total"), offer.get("currency"), language)
+    shop = _esc(offer.get("shop") or "?")
+    condition = _esc(_condition(offer.get("condition"), language))
+    details = []
+    if offer.get("target_total") is not None:
+        details.append(
+            _t(
+                language,
+                "tracked_target",
+                price=_money(offer.get("target_total"), offer.get("currency"), language),
+            )
+        )
+    if offer.get("notify_on_drop"):
+        details.append(_t(language, "tracked_drop"))
+    suffix = f" · {' · '.join(details)}" if details else ""
+    return (
+        f"{prefix}<code>#{_esc(offer.get('id'))}</code> {title} — "
+        f"{price} · {shop} · {condition}{suffix}"
+    )
+
+
+def format_tracked_added(offer: dict[str, Any], language: str = "en") -> str:
+    return (
+        f"<b>{_t(language, 'tracked_added', id=_esc(offer.get('id')))}</b>\n"
+        + _tracked_line(offer, language)
+    )
+
+
+def format_tracked_exists(offer: dict[str, Any], language: str = "en") -> str:
+    return _t(language, "tracked_exists", id=_esc(offer.get("id")))
+
+
+def format_tracked_list(offers: list[dict[str, Any]], language: str = "en") -> str:
+    if not offers:
+        return _t(language, "tracked_none")
+    lines = [f"<b>{_t(language, 'tracked_list_header')}</b>"]
+    for index, offer in enumerate(offers[:10], start=1):
+        lines.append(_tracked_line(offer, language, index))
+    return "\n".join(lines)
+
+
+def format_tracked_untracked(offer_id: str, language: str = "en") -> str:
+    return _t(language, "tracked_untracked", id=_esc(offer_id))
+
+
+def format_tracked_history(offer: dict[str, Any], language: str = "en") -> str:
+    snapshots = offer.get("snapshots") or []
+    lines = [
+        f"<b>{_t(language, 'tracked_history_header', id=_esc(offer.get('id')))}</b>",
+        _tracked_line(offer, language),
+    ]
+    if not snapshots:
+        lines.append(_t(language, "tracked_history_empty"))
+        return "\n".join(lines)
+    points = [
+        f"{str(item.get('at') or '')[:10]} "
+        f"{_money(item.get('total', item.get('price')), offer.get('currency'), language)}"
+        for item in snapshots[-10:]
+        if isinstance(item, dict)
+    ]
+    lines.append(" → ".join(points))
+    return "\n".join(lines)
+
+
+def format_tracked_alert(offer: dict[str, Any], language: str = "en") -> str:
+    details = []
+    if offer.get("target_total") is not None:
+        details.append(
+            _t(
+                language,
+                "tracked_target",
+                price=_money(offer.get("target_total"), offer.get("currency"), language),
+            )
+        )
+    if offer.get("notify_on_drop"):
+        details.append(_t(language, "tracked_drop"))
+    detail = " · ".join(details) if details else _t(language, "no_condition")
+    return _t(language, "tracked_alert_set", id=_esc(offer.get("id")), detail=detail)
+
+
+def format_tracked_drop(
+    event: dict[str, Any], language: str = "en"
+) -> str:
+    offer = event.get("offer") or {}
+    old = _money(event.get("old_total"), offer.get("currency"), language)
+    new = _money(event.get("new_total"), offer.get("currency"), language)
+    reason = (
+        _t(
+            language,
+            "tracked_drop_target",
+            target=_money(offer.get("target_total"), offer.get("currency"), language),
+        )
+        if event.get("reason") == "target"
+        else _t(language, "tracked_drop_fall")
+    )
+    lines = [
+        f"<b>{_t(language, 'tracked_drop_title', title=_esc(offer.get('title') or '?'))}</b>",
+        f"{old} → <b>{new}</b> · {_esc(offer.get('shop') or '?')}",
+        f"<i>{reason}</i>",
+    ]
+    url = str(offer.get("url") or "")
+    if url.startswith("http"):
+        lines.append(f'<a href="{_esc_attr(url)}">{_esc(url)}</a>')
+    return "\n".join(lines)
+
+
+def format_tracked_alerts(offers: list[dict[str, Any]], language: str = "en") -> str:
+    if not offers:
+        return _t(language, "tracked_alerts_empty")
+    return format_tracked_list(offers, language)

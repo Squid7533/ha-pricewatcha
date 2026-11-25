@@ -28,6 +28,7 @@ from .coordinator import PricewatchaCoordinator, scan_interval_of
 from .runtime import PricewatchaRuntime
 from .services import async_setup_services, async_unload_services
 from .telegram import TelegramFrontend
+from .tracking import TrackedOfferManager
 
 type PricewatchaConfigEntry = ConfigEntry[PricewatchaRuntime]
 
@@ -41,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
     await coordinator.async_config_entry_first_refresh()
 
     ai_config = AIConfig.from_options(entry.options)
+    tracker = TrackedOfferManager(hass, client)
     # Commands and price-drop pushes work as soon as the Telegram bot integration
     # exists; until then the listener is idle and costs nothing.
     frontend = TelegramFrontend(
@@ -66,11 +68,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry) 
             )
         ),
         geizhals=bool(entry.options.get(CONF_GEIZHALS, DEFAULT_GEIZHALS)),
+        tracker=tracker,
     )
     await frontend.async_start()
 
-    entry.runtime_data = PricewatchaRuntime(coordinator=coordinator, telegram=frontend)
+    entry.runtime_data = PricewatchaRuntime(
+        coordinator=coordinator, telegram=frontend, tracker=tracker
+    )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(f"{DOMAIN}_trackers", {})[entry.entry_id] = tracker
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_setup_services(hass)
@@ -84,10 +90,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: PricewatchaConfigEntry)
     runtime = entry.runtime_data
     if runtime is not None and runtime.telegram is not None:
         runtime.telegram.async_stop()
+    if runtime is not None and runtime.tracker is not None:
+        runtime.tracker.async_stop()
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        hass.data.get(f"{DOMAIN}_trackers", {}).pop(entry.entry_id, None)
         if not hass.data.get(DOMAIN):
             async_unload_services(hass)
     return unloaded

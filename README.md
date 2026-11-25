@@ -57,6 +57,11 @@ lives in **Configure** on the integration.
 | `pricewatcha.best_deal` | Ranked deals with price, condition, history, URL, plus `groups` by capacity and condition |
 | `pricewatcha.price_history` | Low/high/average/trend for one `product_id` |
 | `pricewatcha.track` | Submit a product URL; `watch: true` keeps it |
+| `pricewatcha.track_offer` | Store a web offer for refresh, snapshots and alerts |
+| `pricewatcha.untrack_offer` | Remove a stored web offer |
+| `pricewatcha.list_tracked_offers` | List stored web offers with last price and alert state |
+| `pricewatcha.offer_history` | One tracked offer including its snapshots |
+| `pricewatcha.create_offer_alert` / `.delete_offer_alert` | Target/any-drop alert on a tracked web offer |
 | `pricewatcha.watch` / `.unwatch` | Add/remove a product from the watchlist (adds/removes its sensor) |
 | `pricewatcha.list_alerts` / `.create_alert` / `.update_alert` / `.delete_alert` | Manage Pricewatcha price alerts |
 | `pricewatcha.refresh` | Poll now instead of waiting for the interval |
@@ -174,12 +179,15 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
 | anything without a slash | an action goes to the AI planner; a question becomes `/ask`; otherwise a search |
 | `/search iphone 18 pro` | numbered catalog matches with prices and shops |
-| `/track <url>` | track a URL and watch it |
-| `/track 1` | watch the first web offer from the last `/ask`; `/track` alone lists them |
+| `/track <url>` | track a URL, watch it, and store it for history/alerts |
+| `/track 1` | track the first web offer from the last `/deal` or `/ask`; persists it |
+| `/untrack 1` / `/untrack #id` | stop tracking a stored web offer |
+| `/trackalert 1 target 700` | target or any-drop alert for a tracked offer |
+| `/trackalerts` | tracked web-offer alerts |
 | `/watch 1` | watch the first result from the last `/deal` or `/search` |
 | `/unwatch 1` | stop watching the first entry from `/watchlist` |
-| `/watchlist` | watched products with prices and numbers |
-| `/history 1` | price history of a result or watched product |
+| `/watchlist` | watched products plus tracked web offers |
+| `/history 1` | price history of a result, watched product or tracked web offer |
 | `/product 1` | details of a result or watched product |
 | `/alerts` | your price alerts |
 | `/alert 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop`/`rise` `on/off`, `drop only` (any drop, no threshold), `pause`, `resume`, `name …`; several fields in one line |
@@ -263,6 +271,38 @@ therefore its own unverified block and never changes the catalog ranking. The op
 **off by default** because idealo can change its markup or block automated requests; a
 failed fetch simply omits the block. For reliable per-shop offers, a paid price API
 (such as PricePirate) would be the alternative.
+
+### Tracked web offers
+
+`/track` now stores a web offer independently of Pricewatcha: source URL, shop, condition,
+last price and snapshots in `config/.storage/pricewatcha.tracked_offers`. The background
+tracker refreshes it every 60 minutes (and after a restart loads it again), so history and
+alerts survive Home Assistant restarts.
+
+```text
+/track 1
+# Tracked as #a1b2c3d4
+# iPhone Air — 799 € · MediaMarkt · new
+
+/trackalert 1 target 700
+# Alert for #a1b2c3d4: target 700 €
+
+/watchlist
+# Tracked external offers:
+# 1. #a1b2c3d4 iPhone Air — 799 € · MediaMarkt · new · target 700 €
+
+/history 1
+# Tracked history #a1b2c3d4 …
+```
+
+- A target alert fires once at/below the target and again only on a **further** drop.
+- Any-drop alerts fire once per new lower price.
+- `last_notified_total` is stored, so a restart does not repeat the same notification.
+- `/untrack` removes the offer and stops its refreshes.
+- Catalog products keep using Pricewatcha `/watch`; `/track` on a catalog result falls back
+  to that watch.
+- The 60-minute refresh is deliberately conservative; shop pages can block a refresh, in
+  which case the last snapshot stays and the next cycle tries again.
 
 ### Talking to the bot
 
@@ -418,18 +458,18 @@ that the allowed chat survived; a re-added bot creates a new entry with no chats
   ("rate limit") instead of presenting a thinner shortlist as complete.
 - Authenticated read quota is roughly 3000 requests/day, so a 30-minute interval with
   occasional searches is far inside it.
-- Only watched products are refreshed by Pricewatcha's scheduler; a one-shot `track`
-  without `watch` does not enrol anything.
+- Pricewatcha refreshes watched catalog products; web offers stored by the bot are
+  refreshed separately every 60 minutes. A Pricewatcha `track` without `watch` still
+  does not enrol anything.
 - Prices are informational; the merchant page is authoritative.
 
 ## Not (yet) included
 
 - **Assist intents** — the AI advisor is Telegram-only for now; a conversation agent
   that calls `best_deal` directly is not wired up yet.
-- **Complete external coverage** — `/deal` now confirms prices on the first two direct
-  shop results and lists them as unverified web finds; comparison sites (idealo,
-  billiger, geizhals) are skipped, and a blocked shop page means no web find. It is not a
-  full market scan.
+- **Complete external coverage** — `/deal` reads the first three direct shop pages plus
+  idealo/Geizhals aggregates; classifieds, Amazon and eBay are not included. It is not a
+  full market scan, and blocked shop pages simply yield no row.
 - Webhook subscriptions (Pricewatcha's push API) — polling covers the current use.
 
 ## Development

@@ -31,6 +31,16 @@ ATTR_MAX_PRICE = "max_price"
 ATTR_CANDIDATES = "candidates"
 ATTR_INCLUDE_ACCESSORIES = "include_accessories"
 ATTR_ALERT_ID = "alert_id"
+ATTR_OFFER_ID = "offer_id"
+ATTR_CHAT_ID = "chat_id"
+ATTR_TARGET_TOTAL = "target_total"
+ATTR_NOTIFY_ON_DROP = "notify_on_drop"
+ATTR_TITLE = "title"
+ATTR_SHOP = "shop"
+ATTR_PRICE = "price"
+ATTR_CURRENCY = "currency"
+ATTR_CONDITION = "condition"
+ATTR_QUERY = "query"
 
 SERVICE_SEARCH = "search"
 SERVICE_BEST_DEAL = "best_deal"
@@ -43,6 +53,12 @@ SERVICE_CREATE_ALERT = "create_alert"
 SERVICE_UPDATE_ALERT = "update_alert"
 SERVICE_DELETE_ALERT = "delete_alert"
 SERVICE_REFRESH = "refresh"
+SERVICE_TRACK_OFFER = "track_offer"
+SERVICE_UNTRACK_OFFER = "untrack_offer"
+SERVICE_LIST_TRACKED_OFFERS = "list_tracked_offers"
+SERVICE_OFFER_HISTORY = "offer_history"
+SERVICE_CREATE_OFFER_ALERT = "create_offer_alert"
+SERVICE_DELETE_OFFER_ALERT = "delete_offer_alert"
 
 def _coordinator(hass: HomeAssistant, call: ServiceCall) -> PricewatchaCoordinator:
     entries: dict[str, PricewatchaCoordinator] = hass.data.get(DOMAIN, {})
@@ -56,6 +72,20 @@ def _coordinator(hass: HomeAssistant, call: ServiceCall) -> PricewatchaCoordinat
     if len(entries) > 1:
         raise HomeAssistantError("Several Pricewatcha entries are loaded; pass config_entry_id")
     return next(iter(entries.values()))
+
+
+def _tracker(hass: HomeAssistant, call: ServiceCall):
+    trackers: dict[str, Any] = hass.data.get(f"{DOMAIN}_trackers", {})
+    if not trackers:
+        raise HomeAssistantError("Pricewatcha tracked offers are not set up")
+    entry_id = call.data.get(CONF_ENTRY)
+    if entry_id:
+        if entry_id not in trackers:
+            raise HomeAssistantError(f"Unknown config_entry_id {entry_id}")
+        return trackers[entry_id]
+    if len(trackers) > 1:
+        raise HomeAssistantError("Several Pricewatcha entries are loaded; pass config_entry_id")
+    return next(iter(trackers.values()))
 
 
 def _guard(err: Exception) -> HomeAssistantError:
@@ -173,6 +203,71 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_refresh(call: ServiceCall) -> None:
         await _coordinator(hass, call).async_request_refresh()
+
+    async def handle_track_offer(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        offer, created = await tracker.async_add(
+            chat_id=int(call.data.get(ATTR_CHAT_ID, 0)),
+            source=str(call.data.get("source", "web")),
+            url=str(call.data[ATTR_URL]),
+            title=str(call.data.get(ATTR_TITLE) or call.data[ATTR_URL]),
+            shop=str(call.data.get(ATTR_SHOP) or "web"),
+            price=call.data.get(ATTR_PRICE),
+            currency=str(call.data.get(ATTR_CURRENCY) or "EUR"),
+            condition=str(call.data.get(ATTR_CONDITION) or "unknown"),
+            query=str(call.data.get(ATTR_QUERY) or ""),
+            target_total=call.data.get(ATTR_TARGET_TOTAL),
+            notify_on_drop=bool(call.data.get(ATTR_NOTIFY_ON_DROP, False)),
+        )
+        return {"created": created, "offer": offer}
+
+    async def handle_untrack_offer(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        removed = await tracker.async_remove(
+            str(call.data[ATTR_OFFER_ID]),
+            int(call.data.get(ATTR_CHAT_ID, 0)) or None,
+        )
+        return {"removed": removed, "offer_id": call.data[ATTR_OFFER_ID]}
+
+    async def handle_list_tracked_offers(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        chat_id = call.data.get(ATTR_CHAT_ID)
+        offers = tracker.list(int(chat_id) if chat_id is not None else None)
+        return {"count": len(offers), "offers": offers}
+
+    async def handle_offer_history(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        offer = tracker.get(
+            str(call.data[ATTR_OFFER_ID]),
+            int(call.data.get(ATTR_CHAT_ID, 0)) or None,
+        )
+        if offer is None:
+            raise HomeAssistantError(f"Unknown tracked offer {call.data[ATTR_OFFER_ID]}")
+        return offer
+
+    async def handle_create_offer_alert(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        offer = await tracker.async_set_alert(
+            str(call.data[ATTR_OFFER_ID]),
+            target_total=call.data.get(ATTR_TARGET_TOTAL),
+            notify_on_drop=bool(call.data.get(ATTR_NOTIFY_ON_DROP, False)),
+            chat_id=int(call.data.get(ATTR_CHAT_ID, 0)) or None,
+        )
+        if offer is None:
+            raise HomeAssistantError(f"Unknown tracked offer {call.data[ATTR_OFFER_ID]}")
+        return offer
+
+    async def handle_delete_offer_alert(call: ServiceCall) -> dict[str, Any]:
+        tracker = _tracker(hass, call)
+        offer = await tracker.async_set_alert(
+            str(call.data[ATTR_OFFER_ID]),
+            target_total=None,
+            notify_on_drop=False,
+            chat_id=int(call.data.get(ATTR_CHAT_ID, 0)) or None,
+        )
+        if offer is None:
+            raise HomeAssistantError(f"Unknown tracked offer {call.data[ATTR_OFFER_ID]}")
+        return offer
 
     hass.services.async_register(
         DOMAIN,
@@ -294,6 +389,92 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({vol.Optional(CONF_ENTRY): cv.string}))
 
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_TRACK_OFFER,
+        handle_track_offer,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_URL): cv.string,
+                vol.Optional(ATTR_TITLE): cv.string,
+                vol.Optional(ATTR_SHOP): cv.string,
+                vol.Optional(ATTR_PRICE): vol.Coerce(float),
+                vol.Optional(ATTR_CURRENCY): cv.string,
+                vol.Optional(ATTR_CONDITION): cv.string,
+                vol.Optional(ATTR_QUERY): cv.string,
+                vol.Optional(ATTR_CHAT_ID): vol.Coerce(int),
+                vol.Optional(ATTR_TARGET_TOTAL): vol.Coerce(float),
+                vol.Optional(ATTR_NOTIFY_ON_DROP, default=False): cv.boolean,
+                vol.Optional("source", default="web"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UNTRACK_OFFER,
+        handle_untrack_offer,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_OFFER_ID): cv.string,
+                vol.Optional(ATTR_CHAT_ID): vol.Coerce(int),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LIST_TRACKED_OFFERS,
+        handle_list_tracked_offers,
+        schema=vol.Schema(
+            {vol.Optional(CONF_ENTRY): cv.string, vol.Optional(ATTR_CHAT_ID): vol.Coerce(int)}
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_OFFER_HISTORY,
+        handle_offer_history,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_OFFER_ID): cv.string,
+                vol.Optional(ATTR_CHAT_ID): vol.Coerce(int),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_OFFER_ALERT,
+        handle_create_offer_alert,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_OFFER_ID): cv.string,
+                vol.Optional(ATTR_TARGET_TOTAL): vol.Coerce(float),
+                vol.Optional(ATTR_NOTIFY_ON_DROP, default=False): cv.boolean,
+                vol.Optional(ATTR_CHAT_ID): vol.Coerce(int),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_OFFER_ALERT,
+        handle_delete_offer_alert,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_ENTRY): cv.string,
+                vol.Required(ATTR_OFFER_ID): cv.string,
+                vol.Optional(ATTR_CHAT_ID): vol.Coerce(int),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
 
 def async_unload_services(hass: HomeAssistant) -> None:
     """Remove services when the last entry is unloaded."""
@@ -309,6 +490,12 @@ def async_unload_services(hass: HomeAssistant) -> None:
         SERVICE_UPDATE_ALERT,
         SERVICE_DELETE_ALERT,
         SERVICE_REFRESH,
+        SERVICE_TRACK_OFFER,
+        SERVICE_UNTRACK_OFFER,
+        SERVICE_LIST_TRACKED_OFFERS,
+        SERVICE_OFFER_HISTORY,
+        SERVICE_CREATE_OFFER_ALERT,
+        SERVICE_DELETE_OFFER_ALERT,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

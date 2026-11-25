@@ -39,7 +39,7 @@ optional layer on top of the deterministic answer. 3a is implemented through 0.4
 
 **Acceptance:** without AI the 0.3.4 output is unchanged; with a DeepSeek key `/deal`
 gets an assessment and `/ask` answers; a wrong key, a timeout or a spent budget never
-breaks the deterministic reply; 171 tests pass.
+breaks the deterministic reply; 181 tests pass.
 
 ## 3b — provider-neutral web search for `/ask` (done in 0.4.3)
 
@@ -140,7 +140,7 @@ with the caption "price · shop · condition" and the product name, then deleted
 
 **Acceptance:** a real asgoodasnew page yields a 14 KB JPEG and `refurbished`; the photo
 arrives after the table; disabling the toggle sends text only; a missing image or a
-blocked shop sends no photo and no error; 171 tests pass.
+blocked shop sends no photo and no error; 181 tests pass.
 
 ## 3d — conversation memory (done in 0.4.5)
 
@@ -162,7 +162,7 @@ conversation.
 **Acceptance:** a restarted frontend answers `/ask` from the stored deal; `/reset` clears
 it and `/ask` asks for a new `/deal`; entries older than the configured 3–7 days are
 ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
-171 tests pass.
+181 tests pass.
 
 ## Release plan
 
@@ -225,3 +225,20 @@ ignored; free text "ist 669 gut?" is a follow-up while "iphone 15 pro" searches;
 - `/track` falls back to the first normalized catalog offer when no web find exists;
   aggregate comparison rows explain that they are not trackable.
 - 171 tests.
+
+
+## After phase 3 — 0.9.0 universal tracker
+
+- `tracking.py`: persistent `TrackedOffer` records in `pricewatcha.tracked_offers`,
+  with source URL, shop, condition, last price, target/drop alert and snapshots.
+- Background refresh every 60 minutes; `TrackedOfferManager` reloads the store on start.
+- `/track` stores a web offer (Pricewatcha tracking is still attempted); `/watchlist`
+  lists catalog and tracked web offers; `/untrack` and `/trackalert` manage them.
+- `/history` shows snapshots for a tracked web offer, otherwise catalog history.
+- Alerts fire once at target and only on a further drop; `last_notified_total` survives
+  restarts, so the same notification is not repeated.
+- Services: `track_offer`, `untrack_offer`, `list_tracked_offers`, `offer_history`,
+  `create_offer_alert`, `delete_offer_alert`.
+- AI tools: track/untrack/list/history/create/delete for tracked offers; tracked offers
+  are part of the planner context.
+- 181 tests.

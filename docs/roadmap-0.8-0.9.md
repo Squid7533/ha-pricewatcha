@@ -1,8 +1,8 @@
 # Roadmap 0.8.0 and 0.9.0 — free-source deal engine and universal tracker
 
-Status: 0.8.0 implemented in v0.8.0. 0.9.0 remains planned; start it as a separate goal round.
+Status: 0.8.0 and 0.9.0 implemented in v0.8.0/v0.9.0.
 
-Baseline: 0.7.0, 162 tests; 0.8.0 adds 9 tests (171 total).
+Baseline: 0.7.0, 162 tests; 0.8.0 adds 9 (171 total), 0.9.0 adds 10 (181 total).
 
 ## Goal
 
@@ -287,11 +287,11 @@ Keep existing `watch`/`unwatch` for catalog products; document the difference.
 
 ## 0.9.0 release criteria
 
-- [ ] A web offer survives a restart and is still tracked.
-- [ ] `/history` shows at least two snapshots.
-- [ ] A price drop produces exactly one Telegram notification.
-- [ ] `/untrack` removes it and stops refreshes.
-- [ ] All tests, docs, HACS release.
+- [x] A web offer survives a restart and is still tracked.
+- [x] `/history` shows at least two snapshots.
+- [x] A price drop produces exactly one Telegram notification.
+- [x] `/untrack` removes it and stops refreshes.
+- [x] All tests, docs, HACS release.
 
 ---
 

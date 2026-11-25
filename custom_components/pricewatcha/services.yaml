@@ -260,3 +260,161 @@ refresh:
       required: false
       selector:
         text:
+
+track_offer:
+  name: Track a web offer
+  description: >-
+    Persist a web offer for periodic refresh, price snapshots and optional alerts.
+  fields:
+    url:
+      required: true
+      selector:
+        text:
+    title:
+      required: false
+      selector:
+        text:
+    shop:
+      required: false
+      selector:
+        text:
+    price:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    currency:
+      required: false
+      selector:
+        text:
+    condition:
+      required: false
+      selector:
+        text:
+    query:
+      required: false
+      selector:
+        text:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    target_total:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    notify_on_drop:
+      required: false
+      default: false
+      selector:
+        boolean:
+    source:
+      required: false
+      default: web
+      selector:
+        text:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+untrack_offer:
+  name: Stop tracking a web offer
+  description: Remove a stored web offer and stop its refresh.
+  fields:
+    offer_id:
+      required: true
+      selector:
+        text:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+list_tracked_offers:
+  name: List tracked web offers
+  description: Return stored web offers with their last price and alert settings.
+  fields:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+offer_history:
+  name: Tracked offer history
+  description: Return a tracked web offer including its price snapshots.
+  fields:
+    offer_id:
+      required: true
+      selector:
+        text:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+create_offer_alert:
+  name: Create tracked-offer alert
+  description: Set a target total and/or any-drop alert on a tracked web offer.
+  fields:
+    offer_id:
+      required: true
+      selector:
+        text:
+    target_total:
+      required: false
+      selector:
+        number:
+          min: 0
+          mode: box
+    notify_on_drop:
+      required: false
+      default: false
+      selector:
+        boolean:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:
+
+delete_offer_alert:
+  name: Delete tracked-offer alert
+  description: Remove target and drop alerts from a tracked web offer.
+  fields:
+    offer_id:
+      required: true
+      selector:
+        text:
+    chat_id:
+      required: false
+      selector:
+        number:
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        text:

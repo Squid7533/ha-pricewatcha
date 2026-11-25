@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .coordinator import PricewatchaCoordinator
     from .telegram import TelegramFrontend
+    from .tracking import TrackedOfferManager
 
 
 @dataclass(slots=True)
@@ -16,3 +17,4 @@ class PricewatchaRuntime:
 
     coordinator: PricewatchaCoordinator
     telegram: TelegramFrontend | None = None
+    tracker: TrackedOfferManager | None = None

@@ -614,6 +614,78 @@ ACTION_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "track_offer",
+            "description": "Track a web offer persistently, including price history and alerts.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "untrack_offer",
+            "description": "Stop tracking a stored web offer.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tracked_offers",
+            "description": "List stored tracked web offers.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "offer_history",
+            "description": "Show the saved price snapshots of a tracked web offer.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_offer_alert",
+            "description": "Set a target total or any-drop alert on a tracked web offer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "target_total": {"type": "number"},
+                    "drop": {"type": "boolean"},
+                },
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_offer_alert",
+            "description": "Remove the alert from a tracked web offer.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "unwatch",
             "description": "Stop watching a product.",
             "parameters": {
@@ -817,6 +889,8 @@ _ACTION_PROMPTS = {
         "'change the price alert to 400 EUR' -> update_alert with min=400 and the "
         "current alert ref; 'ohne Wert' or 'preis fallend' means drop=true with "
         "clear_thresholds=true.\n"
+        "Getrackte Web-Angebote stehen im Kontext unter tracked (ref = id); nutze "
+        "track_offer, offer_history und create_offer_alert dafür.\n"
         "Answer in English."
     ),
 }
