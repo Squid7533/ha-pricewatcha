@@ -635,7 +635,7 @@ def test_registers_the_command_menu(monkeypatch):
     token, commands = calls[0]
     assert token == "tok"
     names = [name for name, _ in commands]
-    assert names == ["deal", "ask", "search", "track", "untrack", "trackalerts", "watch", "watchlist", "history", "status", "refresh", "alerts", "alert", "reset", "help"]
+    assert names == ["deal", "ask", "track", "alerts", "status", "refresh", "reset", "help"]
 
 
 def test_repair_issue_when_no_allowed_chats(monkeypatch):
@@ -1206,24 +1206,25 @@ def test_ask_stores_its_sources_and_track_uses_the_number():
     run(scenario())
 
 
-def test_track_without_an_argument_lists_the_stored_offers():
-    advisor = FakeAdvisor(
-        citations=[{"url": "https://shop.example/better", "title": "Better offer"}]
-    )
-
+def test_track_without_an_argument_lists_the_watchlist_and_tracker():
     async def scenario():
-        hass, _, _ = await make_frontend(advisor=advisor)
-        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/deal", "args": ["iphone"]})
-        await asyncio.sleep(0.05)
-        hass.bus.fire("telegram_text", {"chat_id": 1, "text": "und black friday?"})
-        await asyncio.sleep(0.05)
-
+        tracker = FakeTracker()
+        await tracker.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/better",
+            title="Better offer",
+            shop="Shop",
+            price=799,
+        )
+        hass, _, _ = await make_frontend(tracker=tracker)
         hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": []})
         await asyncio.sleep(0.05)
 
         message = hass.services.calls[-1][2]["message"]
-        assert "Web-Angebote aus der letzten Antwort" in message
-        assert "https://shop.example/better" in message
+        assert "Watchlist & tracker" in message
+        assert "Better offer" in message
+        assert "#t1" in message
 
     run(scenario())
 
@@ -1828,5 +1829,128 @@ def test_natural_language_sets_a_tracked_offer_alert():
 
         assert tracker.get(offer["id"], 1)["target_total"] == 700.0
         assert tracker.get(offer["id"], 1)["notify_on_drop"] is True
+
+    run(scenario())
+
+
+def test_track_unified_remove_history_info_and_alert():
+    async def scenario():
+        tracker = FakeTracker()
+        offer, _ = await tracker.async_add(
+            chat_id=1,
+            source="web",
+            url="https://shop.example/p",
+            title="iPhone Air",
+            shop="MediaMarkt",
+            price=799,
+        )
+        hass, coordinator, _ = await make_frontend(tracker=tracker)
+        coordinator.data = {
+            "prod_a": {
+                "name": "iPhone Air",
+                "current_price": 669,
+                "currency": "EUR",
+                "shop": "Asgoodasnew",
+            }
+        }
+
+        hass.bus.fire("telegram_command", {"chat_id": 1, "command": "/track", "args": []})
+        await asyncio.sleep(0.05)
+        message = hass.services.calls[-1][2]["message"]
+        assert "1. [Catalog] iPhone Air" in message
+        assert "2. [Web <code>#t1</code>]" in message
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["info", "2"]}
+        )
+        await asyncio.sleep(0.05)
+        assert "Tracked web offer #t1" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/track", "args": ["history", "2"]},
+        )
+        await asyncio.sleep(0.05)
+        assert "Tracked history #t1" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/track", "args": ["alert", "2", "target", "700"]},
+        )
+        await asyncio.sleep(0.05)
+        assert tracker.get(offer["id"], 1)["target_total"] == 700.0
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["remove", "1"]}
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.unwatched == ["prod_a"]
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["remove", "2"]}
+        )
+        await asyncio.sleep(0.05)
+        assert tracker.list(1) == []
+
+    run(scenario())
+
+
+def test_alerts_namespace_edit_and_new():
+    async def scenario():
+        hass, coordinator, _ = await make_frontend()
+        coordinator.client.alerts_list = [
+            {
+                "alert_id": 1324,
+                "name": "Deal range",
+                "currency": "EUR",
+                "min_threshold_price": 620,
+                "is_active": True,
+            }
+        ]
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alerts", "args": ["edit", "1324", "min", "600"]},
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.updated_alerts == [(1324, {"min_threshold_price": 600.0})]
+
+        hass.bus.fire(
+            "telegram_command",
+            {"chat_id": 1, "command": "/alerts", "args": ["new", "prod_a", "min", "620"]},
+        )
+        await asyncio.sleep(0.05)
+        assert coordinator.client.created_alerts
+
+    run(scenario())
+
+
+def test_track_and_alerts_help():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/track", "args": ["help"]}
+        )
+        await asyncio.sleep(0.05)
+        assert "/track remove 1" in hass.services.calls[-1][2]["message"]
+
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/alerts", "args": ["help"]}
+        )
+        await asyncio.sleep(0.05)
+        assert "/alerts edit 1324" in hass.services.calls[-1][2]["message"]
+
+    run(scenario())
+
+
+def test_search_top_level_command_is_gone():
+    async def scenario():
+        hass, _, _ = await make_frontend()
+        hass.bus.fire(
+            "telegram_command", {"chat_id": 1, "command": "/search", "args": ["iphone"]}
+        )
+        await asyncio.sleep(0.05)
+        message = hass.services.calls[-1][2]["message"]
+        assert "Pricewatcha commands" in message
+        assert "/search" not in message
 
     run(scenario())

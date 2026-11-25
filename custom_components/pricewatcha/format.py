@@ -32,7 +32,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_deal": "/deal iphone 18 pro — best value, ranked against each product's own price history",
         "help_ask": "/ask is 669 a good price? — ask the AI about your last deal",
         "help_search": "/search iphone 18 pro — raw catalog matches",
-        "help_track": "/track <product url> — track a URL and watch it",
+        "help_track": "/track — watchlist, web tracker, history and alerts (details: /track help)",
         "help_untrack": "/untrack #id — stop tracking a web offer",
         "help_trackalert": "/trackalert 1 target 700 — alert for a tracked web offer",
         "help_trackalerts": "/trackalerts — tracked web-offer alerts",
@@ -43,9 +43,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_product": "/product 1 — details of a result",
         "help_status": "/status — watchlist, last poll, AI spend",
         "help_refresh": "/refresh — poll now",
-        "help_alerts": "/alerts — your price alerts",
+        "help_alerts": "/alerts — price alerts (details: /alerts help)",
         "help_alert": "/alert 1324 min 620 | drop only — change a price alert",
         "help_reset": "/reset — forget the current conversation",
+        "help_help": "/help — this command list",
         "help_free": "Or just type what you are looking for.",
         "reset_done": "Conversation cleared. The next /deal starts fresh.",
         "nothing_matched": 'Nothing matched "{query}".',
@@ -155,6 +156,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tracked_drop_target": "target {target} reached",
         "tracked_drop_fall": "price dropped",
         "tracked_last_checked": "last checked {when}",
+        "track_overview_header": "Watchlist & tracker:",
+        "track_empty": "Nothing watched or tracked yet. Use /deal, then /track 1.",
+        "track_catalog_tag": "Catalog",
+        "track_web_tag": "Web",
+        "track_info_header": "Tracked web offer #{id}",
+        "track_help": "/track — list watchlist + tracked offers\n/track 1 — track a /deal result\n/track <url> — track a URL\n/track remove 1 — remove\n/track history 1 — price history\n/track info 1 — details\n/track alert 1 target 700 — alert\n/track alerts — web alerts",
+        "alerts_help": "/alerts — list\n/alerts show 1324\n/alerts new 1 min 620\n/alerts edit 1324 min 600\n/alerts delete 1324",
+        "track_alert_catalog": "That is a catalog product. Use /alerts new <product_id> for a Pricewatcha alert.",
+
 
         "today": "today",
     },
@@ -163,7 +173,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_deal": "/deal iphone 18 pro — bester Preis, am eigenen Preisverlauf gemessen",
         "help_ask": "/ask ist 669 ein guter Preis? — die KI zum letzten Deal fragen",
         "help_search": "/search iphone 18 pro — rohe Katalogtreffer",
-        "help_track": "/track <produkt-url> — URL tracken und beobachten",
+        "help_track": "/track — Watchlist, Web-Tracker, Verlauf und Alarme (/track help)",
         "help_untrack": "/untrack #id — Web-Angebot nicht mehr tracken",
         "help_trackalert": "/trackalert 1 target 700 — Alarm für ein getracktes Angebot",
         "help_trackalerts": "/trackalerts — Alarme für Web-Angebote",
@@ -174,7 +184,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "help_product": "/product 1 — Details eines Treffers",
         "help_status": "/status — Watchlist, letzter Poll, KI-Ausgaben",
         "help_refresh": "/refresh — jetzt aktualisieren",
-        "help_alerts": "/alerts — deine Preisalarme",
+        "help_alerts": "/alerts — Preisalarme (/alerts help)",
         "help_alert": "/alert 1324 min 620 | drop only — Preisalarm ändern",
         "help_reset": "/reset — das aktuelle Gespräch vergessen",
         "help_free": "Oder einfach tippen, was du suchst.",
@@ -286,6 +296,15 @@ _STRINGS: dict[str, dict[str, str]] = {
         "tracked_drop_target": "Ziel {target} erreicht",
         "tracked_drop_fall": "Preis gefallen",
         "tracked_last_checked": "zuletzt geprüft {when}",
+        "track_overview_header": "Watchlist & Tracker:",
+        "track_empty": "Noch nichts beobachtet oder getrackt. Erst /deal, dann /track 1.",
+        "track_catalog_tag": "Katalog",
+        "track_web_tag": "Web",
+        "track_info_header": "Getracktes Web-Angebot #{id}",
+        "track_help": "/track — Watchlist + Tracker anzeigen\n/track 1 — Treffer aus /deal tracken\n/track <url> — URL tracken\n/track remove 1 — entfernen\n/track history 1 — Preisverlauf\n/track info 1 — Details\n/track alert 1 target 700 — Alarm\n/track alerts — Web-Alarme",
+        "alerts_help": "/alerts — anzeigen\n/alerts show 1324\n/alerts new 1 min 620\n/alerts edit 1324 min 600\n/alerts delete 1324",
+        "track_alert_catalog": "Das ist ein Katalogprodukt. Nutze /alerts new <product_id> für einen Pricewatcha-Alarm.",
+
 
         "today": "heute",
     },
@@ -438,21 +457,12 @@ def format_help(language: str = "en") -> str:
         "",
         _t(language, "help_deal"),
         _t(language, "help_ask"),
-        _t(language, "help_search"),
         _t(language, "help_track"),
-        _t(language, "help_untrack"),
-        _t(language, "help_trackalert"),
-        _t(language, "help_trackalerts"),
-        _t(language, "help_watch"),
-        _t(language, "help_unwatch"),
-        _t(language, "help_watchlist"),
-        _t(language, "help_history"),
-        _t(language, "help_product"),
+        _t(language, "help_alerts"),
         _t(language, "help_status"),
         _t(language, "help_refresh"),
-        _t(language, "help_alerts"),
-        _t(language, "help_alert"),
         _t(language, "help_reset"),
+        _t(language, "help_help"),
         "",
         _t(language, "help_free"),
     ]
@@ -1343,3 +1353,71 @@ def format_tracked_alerts(offers: list[dict[str, Any]], language: str = "en") ->
     if not offers:
         return _t(language, "tracked_alerts_empty")
     return format_tracked_list(offers, language)
+
+
+def format_track_overview(entries: list[dict[str, Any]], language: str = "en") -> str:
+    if not entries:
+        return _t(language, "track_empty")
+    lines = [f"<b>{_t(language, 'track_overview_header')}</b>"]
+    for index, entry in enumerate(entries, start=1):
+        kind = entry.get("kind")
+        if kind == "catalog":
+            tag = _t(language, "track_catalog_tag")
+            title = _esc(entry.get("name") or entry.get("product_id") or "?")
+            price = _money(entry.get("price"), entry.get("currency"), language)
+            shop = _esc(entry.get("shop") or "?")
+            lines.append(f"{index}. [{tag}] {title} — {price} · {shop}")
+            continue
+        tag = _t(language, "track_web_tag")
+        title = _esc(entry.get("title") or entry.get("url") or "?")
+        price = _money(entry.get("last_total"), entry.get("currency"), language)
+        shop = _esc(entry.get("shop") or "?")
+        condition = _esc(_condition(entry.get("condition"), language))
+        detail = []
+        if entry.get("target_total") is not None:
+            detail.append(
+                _t(
+                    language,
+                    "tracked_target",
+                    price=_money(
+                        entry.get("target_total"), entry.get("currency"), language
+                    ),
+                )
+            )
+        if entry.get("notify_on_drop"):
+            detail.append(_t(language, "tracked_drop"))
+        suffix = f" · {' · '.join(detail)}" if detail else ""
+        lines.append(
+            f"{index}. [{tag} <code>#{_esc(entry.get('id'))}</code>] "
+            f"{title} — {price} · {shop} · {condition}{suffix}"
+        )
+    return "\n".join(lines)
+
+
+def format_track_info(offer: dict[str, Any], language: str = "en") -> str:
+    header = _t(language, "track_info_header", id=_esc(offer.get("id")))
+    lines = [f"<b>{header}</b>", _tracked_line(offer, language)]
+    if offer.get("last_checked_at"):
+        lines.append(
+            _t(
+                language,
+                "tracked_last_checked",
+                when=_esc(str(offer["last_checked_at"]).replace("T", " ")[:16]),
+            )
+        )
+    url = str(offer.get("url") or "")
+    if url.startswith("http"):
+        lines.append(f'<a href="{_esc_attr(url)}">{_esc(url)}</a>')
+    return "\n".join(lines)
+
+
+def format_track_help(language: str = "en") -> str:
+    return _t(language, "track_help")
+
+
+def format_alerts_help(language: str = "en") -> str:
+    return _t(language, "alerts_help")
+
+
+def format_track_alert_catalog(language: str = "en") -> str:
+    return _t(language, "track_alert_catalog")

@@ -19,9 +19,9 @@ the account features (watchlist, price alerts) need a free
 - **Services** for search, price history, tracking a URL, watch/unwatch, alerts and an
   immediate refresh, all returning their data so scripts, automations and LLM chats can use
   the answer.
-- **Telegram commands** — `/deal`, `/ask`, `/search`, `/track`, `/watch`, `/alerts`,
-  `/alert`, `/reset` from your phone, plus price-drop pushes, with no YAML and no chat
-  id to look up. `/track 1` watches a web offer the last `/ask` found.
+- **Telegram commands** — `/deal`, `/ask`, `/track`, `/alerts`, `/status`, `/refresh`,
+  `/reset`, `/help` from your phone, plus price-drop pushes, with no YAML and no chat id
+  to look up. `/track` is one namespace for watchlist, web tracker, history and alerts.
 - **Optional AI assessment** — bring your own OpenAI-compatible endpoint (DeepSeek,
   OpenAI, Ollama, LM Studio, …) or Anthropic, and `/deal` gains a short second opinion
   plus `/ask` follow-ups with current web results and sources. Off by default; the
@@ -178,26 +178,27 @@ the first chat that writes to the bot becomes the owner and is remembered.
 | `/deal iphone 18 pro` | best value and a condition-aware best-offer block across catalog, web shops, idealo and Geizhals |
 | `/ask is 669 a good price?` | ask the configured AI about your last `/deal` |
 | anything without a slash | an action goes to the AI planner; a question becomes `/ask`; otherwise a search |
-| `/search iphone 18 pro` | numbered catalog matches with prices and shops |
+| `/track` | watchlist + tracked web offers, one numbered list |
+| `/track 1` | track the first result from the last `/deal` or `/ask` |
 | `/track <url>` | track a URL, watch it, and store it for history/alerts |
-| `/track 1` | track the first web offer from the last `/deal` or `/ask`; persists it |
-| `/untrack 1` / `/untrack #id` | stop tracking a stored web offer |
-| `/trackalert 1 target 700` | target or any-drop alert for a tracked offer |
-| `/trackalerts` | tracked web-offer alerts |
-| `/watch 1` | watch the first result from the last `/deal` or `/search` |
-| `/unwatch 1` | stop watching the first entry from `/watchlist` |
-| `/watchlist` | watched products plus tracked web offers |
-| `/history 1` | price history of a result, watched product or tracked web offer |
-| `/product 1` | details of a result or watched product |
-| `/alerts` | your price alerts |
-| `/alert 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop`/`rise` `on/off`, `drop only` (any drop, no threshold), `pause`, `resume`, `name …`; several fields in one line |
-| `/alert new 1 min 620 name …` | create an alert for the first result |
-| `/alert show 1324` / `/alert delete 1324` | show or delete an alert |
-| `/status` | watchlist size, last poll, AI spend, API reachability |
+| `/track remove 1` | remove a catalog or web entry |
+| `/track history 1` | history for a catalog product or tracked web offer |
+| `/track info 1` | details for a catalog product or tracked web offer |
+| `/track alert 1 target 700` | target or any-drop alert for a tracked web offer |
+| `/track alerts` | web-offer alerts |
+| `/alerts` | Pricewatcha alerts |
+| `/alerts edit 1324 min 620` | change an alert: `min`/`max` (or `off`), `drop`/`rise` `on/off`, `drop only`, `pause`, `resume`, `name …` |
+| `/alerts new 1 min 620 name …` | create an alert for the first result |
+| `/alerts show 1324` / `/alerts delete 1324` | show or delete an alert |
+| `/status` | watchlist/tracker size, last poll, AI spend, API reachability |
 | `/refresh` | poll now |
 | `/reset` | forget the current conversation |
-| `/help` | the command list |
+| `/help` | the eight top-level commands |
 
+`/track help` and `/alerts help` list their subcommands. `/track` and `/alerts` are the
+only namespaces; `/search`, `/watch`, `/unwatch`, `/watchlist`, `/untrack`,
+`/trackalert`, `/trackalerts`, `/history`, `/product` and `/alert` are hidden aliases for
+one transition release and no longer appear in the Telegram menu.
 `/alert` is the bot-side manager: `/alert new 1 min 620` creates an alert for the
 first result, `/alert 1324 …` changes only the field you name, and `/alert show` /
 `/alert delete` handle the rest. The ids come from `/alerts`. `/alert 1324 drop only`
@@ -206,9 +207,9 @@ does the same in two explicit fields. Natural language „ändere den Preisalarm
 preis fallend ohne Wert“ maps to that as well.
 
 When `/ask` used the web, its sources are numbered under the answer and stored with the
-conversation. `/track 1` watches the first one without pasting a URL; `/track` without an
-argument lists the current sources. This works after a restart too, for as long as the
-conversation is kept.
+conversation. `/track 1` tracks the first one without pasting a URL; `/track` without an
+argument lists the watchlist and tracked web offers. This works after a restart too, for
+as long as the conversation is kept.
 
 The last `/deal` (payload, AI assessment and the last few questions) is remembered
 **per chat for 3–7 days** (default 7, `Conversation memory (days)` under General), across
@@ -284,23 +285,23 @@ alerts survive Home Assistant restarts.
 # Tracked as #a1b2c3d4
 # iPhone Air — 799 € · MediaMarkt · new
 
-/trackalert 1 target 700
+/track alert 1 target 700
 # Alert for #a1b2c3d4: target 700 €
 
-/watchlist
-# Tracked external offers:
+/track
+# Watchlist & tracker:
 # 1. #a1b2c3d4 iPhone Air — 799 € · MediaMarkt · new · target 700 €
 
-/history 1
+/track history 1
 # Tracked history #a1b2c3d4 …
 ```
 
 - A target alert fires once at/below the target and again only on a **further** drop.
 - Any-drop alerts fire once per new lower price.
 - `last_notified_total` is stored, so a restart does not repeat the same notification.
-- `/untrack` removes the offer and stops its refreshes.
-- Catalog products keep using Pricewatcha `/watch`; `/track` on a catalog result falls back
-  to that watch.
+- `/track remove 1` removes the offer and stops its refreshes.
+- Catalog products keep using Pricewatcha watch internally; `/track` on a catalog result
+  falls back to that watch.
 - The 60-minute refresh is deliberately conservative; shop pages can block a refresh, in
   which case the last snapshot stays and the next cycle tries again.
 
@@ -319,8 +320,8 @@ model, not matched by a regex:
 The planner sees the last catalog results (`1`, `2`, …), the web offers from `/ask`
 (`w1`, …), the watchlist (`l1`, …) and the alerts (`a1324`), and calls exactly one of the
 bot actions. The bot then performs it and answers with the same formatting as the
-command. Providers without tool calls get a hint to use `/watch`, `/alert`, `/history`
-and friends instead.
+command. Providers without tool calls get a hint to use `/track`, `/alerts`, `/status`
+and the other top-level commands instead.
 
 A `/deal` reply looks like this (bold prices and links render in Telegram). When the
 shop exposes a product image, a photo follows the table — switch it off under

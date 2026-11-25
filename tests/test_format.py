@@ -297,14 +297,15 @@ def test_help_lists_commands():
     for command in (
         "/deal",
         "/ask",
-        "/search",
         "/track",
-        "/watch",
         "/alerts",
-        "/alert",
+        "/status",
+        "/refresh",
         "/reset",
     ):
         assert command in text
+    assert "/search" not in text
+    assert "/watch" not in text
 
 
 def test_usage():

@@ -41,6 +41,7 @@ from .const import (
 from .format import (
     format_action_error,
     format_ai_section,
+    format_alerts_help,
     format_chat_reply,
     format_alert_created,
     format_alert_deleted,
@@ -54,6 +55,10 @@ from .format import (
     format_ref_not_found,
     format_refreshed,
     format_search,
+    format_track_alert_catalog,
+    format_track_help,
+    format_track_info,
+    format_track_overview,
     format_tracked_added,
     format_tracked_alert,
     format_tracked_alerts,
@@ -97,22 +102,28 @@ ISSUE_NO_ALLOWED_CHAT = "telegram_no_allowed_chat"
 
 # Shown in Telegram's "/" menu once registered with the Bot API.
 BOT_COMMANDS = [
-    ("deal", "Best deal for a product"),
+    ("deal", "Best deals for a product"),
     ("ask", "Ask about your last deal"),
-    ("search", "Search the product catalog"),
-    ("track", "Track a product URL"),
-    ("untrack", "Stop tracking a web offer"),
-    ("trackalerts", "Tracked web-offer alerts"),
-    ("watch", "Watch a product id"),
-    ("watchlist", "List watched products"),
-    ("history", "Price history for a result"),
+    ("track", "Watchlist, web tracker, history and alerts"),
+    ("alerts", "Price alerts"),
     ("status", "Integration status"),
     ("refresh", "Poll now"),
-    ("alerts", "List price alerts"),
-    ("alert", "Change a price alert"),
     ("reset", "Forget the current conversation"),
     ("help", "Show commands"),
 ]
+
+_BOT_COMMAND_LABELS = {
+    "de": {
+        "deal": "Beste Angebote für ein Produkt",
+        "ask": "Zum letzten Deal fragen",
+        "track": "Watchlist, Web-Tracker, Verlauf & Alarme",
+        "alerts": "Preisalarme",
+        "status": "Status der Integration",
+        "refresh": "Jetzt aktualisieren",
+        "reset": "Aktuelles Gespräch vergessen",
+        "help": "Befehle anzeigen",
+    }
+}
 
 _BOT_COMMAND_LABELS = {
     "de": {
@@ -990,8 +1001,6 @@ class TelegramFrontend:
             await self._async_deals(chat_id, rest)
         elif command == "/ask":
             await self._async_ask(chat_id, rest)
-        elif command == "/search":
-            await self._async_search(chat_id, rest)
         elif command == "/track":
             await self._async_track(chat_id, args)
         elif command == "/untrack":
@@ -1015,8 +1024,9 @@ class TelegramFrontend:
         elif command == "/refresh":
             await self._async_refresh(chat_id)
         elif command == "/alerts":
-            await self._async_alerts(chat_id)
+            await self._async_alerts_command(chat_id, args)
         elif command == "/alert":
+            args = args[1:] if args and args[0].lower() == "edit" else args
             await self._async_alert(chat_id, args)
         elif command == "/reset":
             await self._async_reset(chat_id)
@@ -1288,26 +1298,95 @@ class TelegramFrontend:
         self._touch_memory(chat_id)
         await self._async_save_memory()
 
+    async def _async_track_overview(self, chat_id: int) -> None:
+        entries = self._track_entries(chat_id)
+        await self._async_send(
+            chat_id, format_track_overview(entries, self._language)
+        )
+
+    async def _async_track_remove(self, chat_id: int, raw: str) -> None:
+        entry = self._track_entry(chat_id, raw)
+        if entry is None:
+            await self._async_track_overview(chat_id)
+            return
+        if entry.get("kind") == "catalog":
+            product_id = str(entry.get("product_id") or "")
+            if not product_id:
+                await self._async_send(chat_id, format_ref_not_found(self._language))
+                return
+            await self._coordinator.client.unwatch(product_id)
+            await self._coordinator.async_request_refresh()
+            await self._async_send(
+                chat_id,
+                format_unwatched(
+                    str(entry.get("name") or product_id), self._language
+                ),
+            )
+            return
+        if self._tracker is None:
+            await self._async_send(chat_id, format_ref_not_found(self._language))
+            return
+        await self._tracker.async_remove(str(entry.get("id")), chat_id)
+        await self._async_send(
+            chat_id, format_tracked_untracked(str(entry.get("id")), self._language)
+        )
+
+    async def _async_track_history(self, chat_id: int, raw: str) -> None:
+        entry = self._track_entry(chat_id, raw)
+        if entry is None:
+            await self._async_track_overview(chat_id)
+            return
+        if entry.get("kind") == "catalog":
+            product_id = str(entry.get("product_id") or "")
+            if product_id:
+                await self._async_history(chat_id, product_id)
+                return
+        await self._async_send(
+            chat_id, format_tracked_history(entry, self._language)
+        )
+
+    async def _async_track_info(self, chat_id: int, raw: str) -> None:
+        entry = self._track_entry(chat_id, raw)
+        if entry is None:
+            await self._async_track_overview(chat_id)
+            return
+        if entry.get("kind") == "catalog":
+            product_id = str(entry.get("product_id") or "")
+            if product_id:
+                await self._async_product(chat_id, product_id)
+                return
+        await self._async_send(chat_id, format_track_info(entry, self._language))
+
     async def _async_track(self, chat_id: int, args: list[str]) -> None:
         language = self._language
         raw = args[0].strip() if args else ""
         if not raw:
-            offers = self._last_offers.get(chat_id, [])
-            if not offers:
-                payload = self._last_deals.get(chat_id) or {}
-                offers = [
-                    {
-                        "url": str(offer.get("url") or ""),
-                        "title": str(offer.get("title") or "?"),
-                    }
-                    for offer in (payload.get("offers") or [])
-                    if isinstance(offer, dict)
-                    and offer.get("trackable")
-                    and str(offer.get("url") or "").startswith("http")
-                ]
-            await self._async_send(
-                chat_id, format_offer_list(offers, language)
-            )
+            await self._async_track_overview(chat_id)
+            return
+        head = raw.lower()
+        if head in ("help", "?"):
+            await self._async_send(chat_id, format_track_help(language))
+            return
+        if head in ("list", "show"):
+            await self._async_track_overview(chat_id)
+            return
+        if head in ("remove", "untrack", "delete"):
+            await self._async_track_remove(chat_id, args[1] if len(args) > 1 else "")
+            return
+        if head == "history":
+            await self._async_track_history(chat_id, args[1] if len(args) > 1 else "")
+            return
+        if head == "info":
+            await self._async_track_info(chat_id, args[1] if len(args) > 1 else "")
+            return
+        if head == "alert":
+            await self._async_track_alert(chat_id, args[1:])
+            return
+        if head == "alerts":
+            await self._async_track_alerts(chat_id)
+            return
+        if head == "refresh":
+            await self._async_refresh(chat_id)
             return
         if raw.isdigit():
             offers = self._last_offers.get(chat_id, [])
@@ -1494,6 +1573,38 @@ class TelegramFrontend:
                 chat_id, format_watchlist([], self._language)
             )
 
+    def _track_entries(self, chat_id: int) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for catalog in self._watchlist_entries(chat_id):
+            entries.append({"kind": "catalog", **catalog})
+        if self._tracker is not None:
+            for offer in self._tracker.list(chat_id):
+                entries.append({"kind": "web", **offer})
+        for index, entry in enumerate(entries, start=1):
+            entry["ref"] = str(index)
+        return entries
+
+    def _track_entry(self, chat_id: int, raw: str) -> dict[str, Any] | None:
+        value = str(raw or "").strip().lstrip("#")
+        entries = self._track_entries(chat_id)
+        if value.isdigit():
+            index = int(value) - 1
+            if 0 <= index < len(entries):
+                return entries[index]
+            return None
+        for entry in entries:
+            if str(entry.get("id") or "") == value:
+                return entry
+            if str(entry.get("product_id") or "") == value:
+                return entry
+        matches = [
+            entry
+            for entry in entries
+            if str(entry.get("id") or "").startswith(value)
+            or value.casefold() in str(entry.get("name") or entry.get("title") or "").casefold()
+        ]
+        return matches[0] if len(matches) == 1 else None
+
     def _tracked_for(self, chat_id: int, raw: str) -> dict[str, Any] | None:
         if self._tracker is None:
             return None
@@ -1531,13 +1642,19 @@ class TelegramFrontend:
     async def _async_track_alert(self, chat_id: int, args: list[str]) -> None:
         if self._tracker is None or not args:
             await self._async_send(
-                chat_id, format_usage("/trackalert", "1 target 700", self._language)
+                chat_id, format_usage("/track alert", "1 target 700", self._language)
             )
             return
-        offer = self._tracked_for(chat_id, args[0])
-        if offer is None:
-            await self._async_send(chat_id, format_ref_not_found(self._language))
+        entry = self._track_entry(chat_id, args[0])
+        if entry is None:
+            await self._async_track_overview(chat_id)
             return
+        if entry.get("kind") == "catalog":
+            await self._async_send(
+                chat_id, format_track_alert_catalog(self._language)
+            )
+            return
+        offer = entry
         values = [str(item).lower() for item in args[1:]]
         if not values:
             await self._async_send(
@@ -1560,7 +1677,7 @@ class TelegramFrontend:
                     target = float(values[index + 1].replace(",", "."))
                 except ValueError:
                     await self._async_send(
-                        chat_id, format_usage("/trackalert", "1 target 700", self._language)
+                        chat_id, format_usage("/track alert", "1 target 700", self._language)
                     )
                     return
                 changed = True
@@ -1587,7 +1704,7 @@ class TelegramFrontend:
                     target = float(value.replace(",", "."))
                 except ValueError:
                     await self._async_send(
-                        chat_id, format_usage("/trackalert", "1 target 700", self._language)
+                        chat_id, format_usage("/track alert", "1 target 700", self._language)
                     )
                     return
                 changed = True
@@ -1718,6 +1835,22 @@ class TelegramFrontend:
     async def _async_refresh(self, chat_id: int) -> None:
         await self._coordinator.async_request_refresh()
         await self._async_send(chat_id, format_refreshed(self._language))
+
+    async def _async_alerts_command(self, chat_id: int, args: list[str]) -> None:
+        if not args:
+            await self._async_alerts(chat_id)
+            return
+        head = str(args[0]).lower()
+        if head in ("help", "?"):
+            await self._async_send(chat_id, format_alerts_help(self._language))
+            return
+        if head == "edit":
+            await self._async_alert(chat_id, args[1:])
+            return
+        if head in ("new", "show", "delete", "del", "remove") or head.isdigit():
+            await self._async_alert(chat_id, args)
+            return
+        await self._async_alerts(chat_id)
 
     async def _async_alert(self, chat_id: int, args: list[str]) -> None:
         """Edit, create, show or delete alerts."""
